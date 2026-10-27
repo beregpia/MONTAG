@@ -5,28 +5,83 @@ import { toast } from './ui.js';
 
 export let selectedMediaId = null;
 
+/** Журнал импорта: видимые результаты вместо мимолётных тостов. */
+export const importLog = [];
+
+const VIDEO_ERRORS = {
+  1: 'загрузка прервана',
+  2: 'сетевая ошибка',
+  3: 'ошибка декодирования',
+  4: 'формат или кодек не поддерживается браузером',
+};
+
+export function describeVideoError(err) {
+  return VIDEO_ERRORS[err?.code] || 'неизвестная ошибка';
+}
+
+/** Что браузеры реально открывают — показываем подсказку при неудаче. */
+export const CODEC_HINT =
+  'Браузеры открывают mp4 (H.264 + AAC) и webm (VP8/VP9). '
+  + 'mkv, ProRes, HEVC и avi нужно конвертировать (HandBrake или ffmpeg).';
+
+function logImport(name, ok, message) {
+  importLog.unshift({ name, ok, message, at: Date.now() });
+  if (importLog.length > 6) importLog.pop();
+  bus.emit(EV.MEDIA);
+}
+
 export async function importFiles(fileList) {
-  const files = [...fileList].filter((f) => f.type.startsWith('video/') || /\.(mp4|webm|mov|m4v|mkv)$/i.test(f.name));
+  const files = [...fileList].filter((f) => {
+    const type = f.type || '';
+    return type.startsWith('video/') || /\.(mp4|webm|mov|m4v|mkv|ogg|ogv)$/i.test(f.name || '');
+  });
   if (!files.length) {
     toast('Нужны видеофайлы (mp4, webm, mov…)', { type: 'error' });
+    logImport('—', false, 'выбраны не видеофайлы');
     return [];
   }
-  toast(`Загрузка ${files.length} файл(ов)…`);
   const items = [];
   for (const file of files) {
     try {
-      items.push(await loadMedia(file));
+      const item = await loadMedia(file);
+      items.push(item);
+      logImport(file.name, true, `ок · ${fmtDur(item.duration)}${item.width ? ` · ${item.width}×${item.height}` : ''}`);
     } catch (err) {
       console.error(err);
-      toast(`Не удалось прочитать «${file.name}»: ${err.message || err}`, { type: 'error', timeout: 7000 });
+      logImport(file.name, false, err.message || String(err));
+      toast(`Не удалось прочитать «${file.name}»: ${err.message || err}`, { type: 'error', timeout: 9000 });
     }
   }
   if (items.length) {
     state.media.push(...items);
     bus.emit(EV.MEDIA);
-    toast(`Добавлено в медиатеку: ${items.length}`);
+    toast('Добавлено в медиатеку. Теперь добавьте на таймлайн — кнопка «На таймлайн» или двойной клик по файлу.');
   }
   return items;
+}
+
+/** Добавляет все файлы медиатеки на таймлайн (весь файл целиком). */
+export function appendAllToTimeline() {
+  if (!state.media.length) {
+    toast('Медиатека пуста — сначала импортируйте видео', { type: 'error' });
+    return 0;
+  }
+  let added = 0;
+  for (const media of state.media) {
+    state.clips.push({
+      id: uid('c'),
+      mediaId: media.id,
+      name: media.name.replace(/\.[^.]+$/, ''),
+      in: 0,
+      out: media.duration > 0 ? media.duration : 5,
+      transitionIn: 'none',
+      volume: 1,
+    });
+    added++;
+  }
+  bus.emit(EV.CLIPS);
+  if (added) toast(`На таймлайн добавлено клипов: ${added}`);
+  return added;
 }
 
 function loadMedia(file) {
@@ -46,7 +101,9 @@ function loadMedia(file) {
 
     probe.addEventListener('error', () => {
       clearTimeout(timer);
-      fail('формат не поддерживается браузером');
+      const code = probe.error?.code;
+      const reason = describeVideoError(probe.error);
+      fail(code === 4 ? `${reason}. ${CODEC_HINT}` : reason);
     });
 
     probe.addEventListener('loadedmetadata', async () => {
@@ -136,11 +193,32 @@ export function renderMediaList() {
   list.textContent = '';
   document.getElementById('media-count').textContent = String(state.media.length);
 
+  /* журнал импорта — виден всегда, даже если медиатека пуста */
+  for (const entry of importLog.slice(0, 4)) {
+    const li = document.createElement('li');
+    li.className = 'import-log-entry' + (entry.ok ? ' ok' : ' bad');
+    li.title = entry.message;
+    const mark = document.createElement('span');
+    mark.className = 'import-log-mark';
+    mark.textContent = entry.ok ? '✓' : '✕';
+    const body = document.createElement('div');
+    body.className = 'import-log-body';
+    const name = document.createElement('div');
+    name.className = 'import-log-name';
+    name.textContent = entry.name;
+    const msg = document.createElement('div');
+    msg.className = 'import-log-msg';
+    msg.textContent = entry.message;
+    body.append(name, msg);
+    li.append(mark, body);
+    list.append(li);
+  }
+
   if (!state.media.length) {
     const empty = document.createElement('li');
     empty.className = 'muted small';
     empty.style.padding = '4px 6px';
-    empty.textContent = 'Медиатека пуста';
+    empty.textContent = 'Медиатека пуста. Нет своего видео? Нажмите «Демо-клип».';
     list.append(empty);
     return;
   }
@@ -189,4 +267,10 @@ function fmt(sec) {
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** Короткая длительность для журнала импорта. */
+function fmtDur(sec) {
+  if (!isFinite(sec) || sec <= 0) return 'длит. неизвестна';
+  return `${sec.toFixed(1)} с`;
 }

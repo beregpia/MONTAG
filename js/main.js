@@ -1,7 +1,8 @@
 /* ============ Точка входа: связываем UI и модули ============ */
 
 import { state, EV, bus, totalDuration, clamp } from './state.js';
-import { importFiles, renderMediaList } from './media.js';
+import { importFiles, renderMediaList, appendAllToTimeline } from './media.js';
+import { loadDemoClip } from './demo.js';
 import { initTimeline, deleteSelected } from './timeline.js';
 import { initInspector } from './inspector.js';
 import { initFoleyPanel } from './foley-panel.js';
@@ -36,6 +37,22 @@ function init() {
   fileInput.addEventListener('change', () => {
     importFiles(fileInput.files);
     fileInput.value = '';
+  });
+
+  $('btn-append-all').addEventListener('click', () => appendAllToTimeline());
+  $('btn-demo').addEventListener('click', async () => {
+    const btn = $('btn-demo');
+    btn.disabled = true;
+    const label = btn.textContent;
+    try {
+      await loadDemoClip(importFiles, appendAllToTimeline, (stage) => { btn.textContent = '⏳ …'; });
+    } catch (err) {
+      console.error(err);
+      toast(`Не удалось создать демо-клип: ${err.message || err}`, { type: 'error', timeout: 9000 });
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
   });
 
   const dropzone = $('dropzone');

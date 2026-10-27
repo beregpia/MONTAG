@@ -143,6 +143,38 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   flex: 1;
   min-height: 0;
 }
+.media-actions { display: flex; gap: 6px; padding: 0 12px 8px; }
+
+/* журнал импорта */
+.import-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  margin-bottom: 4px;
+}
+.import-log-entry.ok { border-left: 3px solid #3ecf8e; }
+.import-log-entry.bad { border-left: 3px solid var(--danger); }
+.import-log-mark { font-size: 11px; line-height: 1.5; flex: none; }
+.import-log-entry.ok .import-log-mark { color: #3ecf8e; }
+.import-log-entry.bad .import-log-mark { color: var(--danger); }
+.import-log-body { min-width: 0; }
+.import-log-name {
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 190px;
+}
+.import-log-msg {
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.35;
+  word-break: break-word;
+}
 .media-item {
   display: flex;
   align-items: center;

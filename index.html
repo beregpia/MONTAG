@@ -39,7 +39,11 @@
     <div id="dropzone" class="dropzone">
       <div class="dropzone-icon">🎬</div>
       <div>Перетащите видео сюда</div>
-      <div class="muted small">mp4 · webm · mov · двойной клик — добавить на таймлайн</div>
+      <div class="muted small">mp4 (H.264) · webm (VP8/VP9) — не откроет mkv, ProRes, HEVC</div>
+    </div>
+    <div class="media-actions">
+      <button id="btn-demo" class="btn" style="flex:1" title="Создать тестовый клип с шагами — проверить приложение без своих файлов">🎬 Демо-клип</button>
+      <button id="btn-append-all" class="btn" style="flex:1" title="Добавить все файлы медиатеки на таймлайн">На таймлайн</button>
     </div>
     <ul id="media-list" class="media-list"></ul>
   </aside>
