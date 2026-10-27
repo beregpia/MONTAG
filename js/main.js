@@ -2,7 +2,7 @@
 
 import { state, EV, bus, totalDuration, clamp } from './state.js';
 import { importFiles, renderMediaList, appendAllToTimeline } from './media.js';
-import { loadDemoClip } from './demo.js';
+import { loadDemoClip, demoCapabilities } from './demo.js';
 import { initTimeline, deleteSelected } from './timeline.js';
 import { initInspector } from './inspector.js';
 import { initFoleyPanel } from './foley-panel.js';
@@ -45,10 +45,18 @@ function init() {
     btn.disabled = true;
     const label = btn.textContent;
     try {
-      await loadDemoClip(importFiles, appendAllToTimeline, (stage) => { btn.textContent = '⏳ …'; });
+      toast('Генерирую демо-клип (~9 с)…', { timeout: 9000 });
+      await loadDemoClip(importFiles, appendAllToTimeline, () => { btn.textContent = '⏳ …'; });
     } catch (err) {
       console.error(err);
-      toast(`Не удалось создать демо-клип: ${err.message || err}`, { type: 'error', timeout: 9000 });
+      const caps = demoCapabilities();
+      const missing = Object.entries(caps).filter(([, ok]) => !ok).map(([k]) => k);
+      toast(
+        `Не удалось создать демо-клип: ${err.message || err}`
+        + (missing.length ? `. Не поддерживается: ${missing.join(', ')}` : '')
+        + '. Нужен Chrome, Edge или Firefox.',
+        { type: 'error', timeout: 14000 },
+      );
     } finally {
       btn.disabled = false;
       btn.textContent = label;

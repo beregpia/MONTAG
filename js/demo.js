@@ -78,11 +78,12 @@ export async function makeDemoFile(onStage) {
     throw new Error('браузер не поддерживает запись видео (нужен Chrome, Edge или Firefox)');
   }
 
-  const stream = canvas.captureStream(FPS);
+  const stream = canvas.captureStream(0); // 0 = кадры только по запросу
+  const videoTrack = stream.getVideoTracks()[0];
 
   // --- звук: низкие удары (шаги) + щелчки ---
   const AC = window.AudioContext || window.webkitAudioContext;
-  if (!AC) throw new Error('Web Audio недоступен');
+  if (!AC) throw new Error('Web Audio недоступен в этом браузере');
   const actx = new AC();
   await actx.resume().catch(() => { /* бывает suspended */ });
   const dest = actx.createMediaStreamDestination();
@@ -125,29 +126,61 @@ export async function makeDemoFile(onStage) {
   const stopped = new Promise((res) => { rec.onstop = res; });
 
   onStage?.('Запись демо-сцены…');
-  rec.start(200);
 
-  let raf = 0;
-  const started = performance.now();
+  // Кадры снимаем вручную: requestAnimationFrame в фоновой вкладке или в
+  // свёрнутом превью-iframe не вызывается, и генерация зависла бы навсегда.
+  // setTimeout работает всегда (в фоне — реже, но идёт), поэтому сцену
+  // всегда дорисовываем. Watchdog страхует от любого подвисания.
+  const frameMs = Math.max(16, Math.round(1000 / FPS));
+  let frameCount = 0;
+  const pushFrame = (t) => {
+    drawDemoFrame(ctx, t, script, W, H);
+    frameCount++;
+    if (videoTrack && typeof videoTrack.requestFrame === 'function') videoTrack.requestFrame();
+  };
+
+  pushFrame(0);
+  rec.start(200);
+  const startedAt = performance.now();
   await new Promise((resolve) => {
-    const draw = () => {
-      const t = (performance.now() - started) / 1000;
-      drawDemoFrame(ctx, t, script, W, H);
-      if (t < script.duration) raf = requestAnimationFrame(draw);
-      else resolve();
+    let watchdog = 0;
+    const finish = () => {
+      clearTimeout(watchdog);
+      resolve();
     };
-    draw();
+    const tick = () => {
+      const t = (performance.now() - startedAt) / 1000;
+      pushFrame(Math.min(t, script.duration));
+      if (t >= script.duration) { finish(); return; }
+      setTimeout(tick, frameMs);
+    };
+    // watchdog: не больше длительности + 6 с при любых тормозах таймеров
+    watchdog = setTimeout(finish, script.duration * 1000 + 6000);
+    setTimeout(tick, frameMs);
   });
-  cancelAnimationFrame(raf);
-  drawDemoFrame(ctx, script.duration, script, W, H); // дорисуем последний кадр
-  await new Promise((r) => setTimeout(r, 200));
+
+  pushFrame(script.duration); // дорисуем последний кадр
+  await new Promise((r) => setTimeout(r, 250));
   rec.stop();
   await stopped;
   actx.close().catch(() => { /* ignore */ });
 
   if (!chunks.length) throw new Error('рекордер не отдал данных');
+  if (frameCount < 5) throw new Error('записано слишком мало кадров — попробуйте вернуть вкладку на передний план');
   const blob = new Blob(chunks, { type: rec.mimeType || 'video/webm' });
   return new File([blob], 'demo-footsteps.webm', { type: blob.type });
+}
+
+/** Что поддерживает браузер — для диагностики, если демо не собирается. */
+export function demoCapabilities() {
+  const canvas = document.createElement('canvas');
+  return {
+    mediaRecorder: typeof MediaRecorder !== 'undefined',
+    captureStream: typeof canvas.captureStream === 'function',
+    webm: typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('video/webm'),
+    audioContext: !!(window.AudioContext || window.webkitAudioContext),
+    fileConstructor: typeof File === 'function',
+  };
 }
 
 /** Полный путь: сгенерировать → импортировать → добавить на таймлайн. */

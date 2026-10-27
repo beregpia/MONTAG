@@ -40,7 +40,9 @@ const server = createServer(async (req, res) => {
     const data = await readFile(filePath);
     res.writeHead(200, {
       'content-type': TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream',
-      'cache-control': 'no-cache',
+      // no-store: правки должны появляться сразу, без залипшего кеша
+      'cache-control': 'no-store, no-cache, must-revalidate',
+      pragma: 'no-cache',
     }).end(data);
   } catch (err) {
     res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end('500 — ' + err.message);
