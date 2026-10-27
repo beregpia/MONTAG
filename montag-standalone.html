@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MONTAG — видеомонтаж в браузере</title>
+<style>
+/* ============ MONTAG — оформление ============ */
+:root {
+  --bg: #0c0d10;
+  --bg-panel: #14161b;
+  --bg-elev: #1c1f26;
+  --bg-hover: #23262f;
+  --line: #2a2e38;
+  --text: #e8eaf0;
+  --muted: #8b91a0;
+  --accent: #ff7a2f;
+  --accent-soft: rgba(255, 122, 47, .16);
+  --accent-2: #ffb020;
+  --danger: #ff4d5e;
+  --radius: 10px;
+  --shadow: 0 8px 30px rgba(0, 0, 0, .45);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+}
+
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 600; }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.spacer { flex: 1; }
+.hidden { display: none !important; }
+
+/* ---------- кнопки ---------- */
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .15s, border-color .15s, transform .05s;
+}
+.btn:hover { background: var(--bg-hover); border-color: #3a4150; }
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: linear-gradient(180deg, var(--accent-2), var(--accent)); border-color: #c65f1d; color: #1a0d02; font-weight: 700; }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.ghost { background: transparent; }
+.btn.tiny { padding: 4px 9px; font-size: 12px; }
+.btn.danger { color: var(--danger); border-color: rgba(255, 77, 94, .35); }
+.btn.danger:hover { background: rgba(255, 77, 94, .12); }
+.btn.play { width: 42px; height: 36px; font-size: 15px; border-radius: 50%; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.select {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---------- верхняя панель ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo {
+  display: grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #1a0d02;
+  font-weight: 800;
+}
+.brand-name { font-weight: 800; letter-spacing: .12em; }
+.brand-tag { color: var(--muted); font-size: 12px; }
+.topbar-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ---------- сетка ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: 264px minmax(0, 1fr) 300px;
+  gap: 12px;
+  padding: 12px;
+  min-height: 0;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---------- медиатека ---------- */
+.dropzone {
+  margin: 12px;
+  padding: 18px 12px;
+  border: 1.5px dashed #39404e;
+  border-radius: var(--radius);
+  text-align: center;
+  color: var(--text);
+  font-size: 13px;
+  transition: border-color .15s, background .15s;
+}
+.dropzone.dragover { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone-icon { font-size: 22px; margin-bottom: 4px; }
+
+.media-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 8px 10px;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.media-actions { display: flex; gap: 6px; padding: 0 12px 8px; }
+
+/* журнал импорта */
+.import-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--bg-elev);
+  margin-bottom: 4px;
+}
+.import-log-entry.ok { border-left: 3px solid #3ecf8e; }
+.import-log-entry.bad { border-left: 3px solid var(--danger); }
+.import-log-mark { font-size: 11px; line-height: 1.5; flex: none; }
+.import-log-entry.ok .import-log-mark { color: #3ecf8e; }
+.import-log-entry.bad .import-log-mark { color: var(--danger); }
+.import-log-body { min-width: 0; }
+.import-log-name {
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 190px;
+}
+.import-log-msg {
+  font-size: 10.5px;
+  color: var(--muted);
+  line-height: 1.35;
+  word-break: break-word;
+}
+.media-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.media-item:hover { background: var(--bg-elev); }
+.media-item.selected { background: var(--accent-soft); border-color: rgba(255, 122, 47, .45); }
+.media-thumb {
+  width: 72px; height: 42px;
+  object-fit: cover;
+  border-radius: 5px;
+  background: #000 center/cover no-repeat;
+  flex: none;
+}
+.media-meta { min-width: 0; flex: 1; }
+.media-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.media-sub { font-size: 11px; color: var(--muted); }
+.media-add {
+  border: none; background: var(--bg-elev); color: var(--text);
+  border-radius: 6px; width: 26px; height: 26px; cursor: pointer; font-size: 14px; flex: none;
+}
+.media-add:hover { background: var(--accent); color: #1a0d02; }
+
+/* ---------- сцена ---------- */
+.stage-wrap { display: flex; flex-direction: column; gap: 10px; min-width: 0; min-height: 0; }
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  background:
+    repeating-conic-gradient(#101116 0% 25%, #0b0c0f 0% 50%) 50% / 26px 26px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+#canvas { max-width: 100%; max-height: 100%; display: block; box-shadow: var(--shadow); }
+.stage-empty {
+  position: absolute; inset: 0;
+  display: grid; place-content: center; justify-items: center; gap: 4px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.stage-empty-icon { font-size: 40px; opacity: .5; }
+.export-badge {
+  position: absolute; top: 12px; left: 12px;
+  background: rgba(255, 45, 45, .9);
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .1em;
+  padding: 4px 10px; border-radius: 20px;
+  animation: pulse 1.2s infinite;
+}
+@keyframes pulse { 50% { opacity: .45; } }
+
+.transport {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+.time-display { font-variant-numeric: tabular-nums; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.scrub { flex: 1; accent-color: var(--accent); }
+
+.export-progress { display: flex; align-items: center; gap: 10px; }
+.export-progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-elev); overflow: hidden; }
+.export-progress-bar .fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); transition: width .2s; }
+
+/* ---------- инспектор ---------- */
+.inspector-body { padding: 12px; overflow-y: auto; }
+.inspector-empty { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.insp-title { font-weight: 600; margin-bottom: 2px; }
+.insp-row { margin-top: 14px; }
+.insp-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.insp-label b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 500; }
+.insp-row input[type=range] { width: 100%; accent-color: var(--accent); }
+.inspector-body .btn { width: 100%; margin-top: 16px; }
+
+/* ---------- таймлайн ---------- */
+.timeline-wrap {
+  border-top: 1px solid var(--line);
+  background: var(--bg-panel);
+  padding: 8px 12px 12px;
+}
+.timeline-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.timeline {
+  position: relative;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #0a0b0e;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  user-select: none;
+}
+.ruler {
+  position: relative;
+  height: 24px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.ruler-tick { position: absolute; top: 0; bottom: 0; border-left: 1px solid #23262f; }
+.ruler-tick.major { border-left-color: #3a4150; }
+.ruler-label { position: absolute; top: 4px; left: 5px; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.track { position: relative; height: 84px; }
+.clip {
+  position: absolute;
+  top: 6px; bottom: 6px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #101218 center/cover no-repeat;
+  border: 1.5px solid #3a4150;
+  cursor: grab;
+  transition: border-color .12s, box-shadow .12s;
+}
+.clip:hover { border-color: #556072; box-shadow: 0 0 0 1px #556072; }
+.clip.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.clip.dragging { opacity: .4; }
+.clip-veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10,11,14,.15), rgba(10,11,14,.82)); }
+.clip-label {
+  position: absolute; left: 6px; right: 6px; bottom: 4px;
+  font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.clip-dur { position: absolute; left: 6px; top: 4px; font-size: 10px; color: var(--accent-2); font-variant-numeric: tabular-nums; }
+.clip-badge {
+  position: absolute; right: 5px; top: 4px;
+  font-size: 10px; background: rgba(0,0,0,.55); border: 1px solid #3a4150;
+  border-radius: 4px; padding: 0 4px; color: var(--accent-2);
+}
+.clip-drop-marker {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--accent); border-radius: 2px; pointer-events: none;
+}
+.playhead {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--accent); pointer-events: none; z-index: 5;
+}
+.playhead::before {
+  content: ""; position: absolute; top: 0; left: -5px;
+  border: 6px solid transparent; border-top: 8px solid var(--accent);
+}
+
+/* ---------- тосты ---------- */
+#toasts {
+  position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 8px; z-index: 100; align-items: center;
+}
+.toast {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  animation: toast-in .18s ease-out;
+  max-width: 70vw;
+}
+.toast.error { border-left-color: var(--danger); }
+.toast a { color: var(--accent-2); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* ---------- дорожка фоли ---------- */
+.foley-track {
+  position: relative;
+  height: 34px;
+  border-top: 1px solid var(--line);
+  background: #0d0f13;
+}
+.foley-track-empty {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  font-size: 11px; color: #565d6b;
+}
+.foley-mark {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid; place-items: center;
+  background: var(--bg-elev);
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .12s, transform .12s;
+}
+.foley-mark:hover { border-color: var(--accent); transform: translateX(-50%) scale(1.12); }
+.foley-mark.selected { border-color: var(--accent); background: var(--accent-soft); }
+.foley-mark.detected { border-style: dashed; }
+
+/* ---------- drawer Foley ---------- */
+.foley-drawer {
+  position: fixed;
+  top: 49px;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 92vw;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, .5);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in .18s ease-out;
+}
+@keyframes drawer-in { from { transform: translateX(30px); opacity: 0; } }
+.foley-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.foley-body { overflow-y: auto; padding: 4px 12px 20px; }
+.foley-section { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.foley-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--accent-2); font-weight: 700; }
+.foley-stat { line-height: 1.5; }
+
+.foley-events { display: flex; flex-direction: column; gap: 5px; max-height: 320px; overflow-y: auto; }
+.foley-event {
+  display: grid;
+  grid-template-columns: 62px 1fr auto;
+  grid-template-areas: "time sfx nudge" "gain gain gain" "play play del";
+  align-items: center;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.foley-event:hover { border-color: #3a4150; }
+.foley-event.selected { border-color: var(--accent); background: var(--accent-soft); }
+.foley-event-time { grid-area: time; font-variant-numeric: tabular-nums; font-size: 12px; display: flex; flex-direction: column; }
+.foley-event .tiny-select { grid-area: sfx; font-size: 11px; padding: 3px 4px; }
+.foley-nudge { grid-area: nudge; display: flex; align-items: center; gap: 3px; }
+.foley-gain { grid-area: gain; width: 100%; accent-color: var(--accent); height: 14px; }
+.foley-event > .btn { grid-area: play; }
+.foley-event > .danger { grid-area: del; justify-self: end; }
+
+.foley-lib { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.foley-lib-btn { display: flex; align-items: center; gap: 6px; text-align: left; padding: 6px 8px; }
+.foley-lib-icon { font-size: 15px; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 5px; border: 2px solid var(--bg-panel); }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 210px minmax(0, 1fr) 250px; }
+  .brand-tag { display: none; }
+}
+
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">M</span>
+    <span class="brand-name">MONTAG</span>
+    <span class="brand-tag">видеомонтаж в браузере</span>
+  </div>
+  <div class="topbar-actions">
+    <button id="btn-import" class="btn">＋ Импорт видео</button>
+    <select id="resolution" class="select" title="Размер проекта">
+      <option value="1920x1080">1920 × 1080</option>
+      <option value="1280x720" selected>1280 × 720</option>
+      <option value="1080x1080">1080 × 1080</option>
+      <option value="720x1280">720 × 1280 (вертикально)</option>
+    </select>
+    <button id="btn-save" class="btn ghost" title="Сохранить проект в JSON">Проект ↓</button>
+    <button id="btn-load" class="btn ghost" title="Открыть проект из JSON">Проект ↑</button>
+    <button id="btn-foley" class="btn ghost" title="Foley — синхронизация звука с видео">🎙 Foley</button>
+    <button id="btn-export" class="btn primary" title="Собрать видео и скачать webm">⏺ Экспорт видео</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h2>Медиа</h2>
+      <span class="muted" id="media-count">0</span>
+    </div>
+    <div id="dropzone" class="dropzone">
+      <div class="dropzone-icon">🎬</div>
+      <div>Перетащите видео сюда</div>
+      <div class="muted small">mp4 (H.264) · webm (VP8/VP9) — не откроет mkv, ProRes, HEVC</div>
+    </div>
+    <div class="media-actions">
+      <button id="btn-demo" class="btn" style="flex:1" title="Создать тестовый клип с шагами — проверить приложение без своих файлов">🎬 Демо-клип</button>
+      <button id="btn-append-all" class="btn" style="flex:1" title="Добавить все файлы медиатеки на таймлайн">На таймлайн</button>
+    </div>
+    <ul id="media-list" class="media-list"></ul>
+  </aside>
+
+  <section class="stage-wrap">
+    <div class="stage" id="stage">
+      <canvas id="canvas" width="1280" height="720"></canvas>
+      <div id="stage-empty" class="stage-empty">
+        <div class="stage-empty-icon">🎞</div>
+        <div>Таймлайн пуст</div>
+        <div class="muted small">Импортируйте видео и добавьте клипы двойным кликом</div>
+      </div>
+      <div id="export-badge" class="export-badge hidden">● ЗАПИСЬ</div>
+    </div>
+
+    <div class="transport">
+      <button id="btn-play" class="btn play" title="Пуск / пауза (Пробел)">▶</button>
+      <span id="time-display" class="time-display">00:00.0 / 00:00.0</span>
+      <input id="scrub" class="scrub" type="range" min="0" max="1000" value="0" step="1" title="Позиция воспроизведения">
+      <button id="btn-split" class="btn ghost" title="Разделить клип на позиции-playhead (S)">✂ Разделить</button>
+      <button id="btn-fullscreen" class="btn ghost" title="Полный экран">⛶</button>
+    </div>
+
+    <div id="export-progress" class="export-progress hidden">
+      <div class="export-progress-bar"><div id="export-progress-fill" class="fill"></div></div>
+      <span id="export-progress-label" class="small muted">Запись…</span>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="panel-head"><h2>Клип</h2></div>
+    <div id="inspector-body" class="inspector-body"></div>
+  </aside>
+
+</main>
+
+<footer class="timeline-wrap">
+  <div class="timeline-toolbar">
+    <h2>Таймлайн</h2>
+    <span id="timeline-info" class="muted small">0 клипов · 00:00.0</span>
+    <div class="spacer"></div>
+    <button id="zoom-out" class="btn ghost tiny" title="Уменьшить">−</button>
+    <button id="zoom-in" class="btn ghost tiny" title="Увеличить">＋</button>
+    <button id="btn-clear" class="btn ghost tiny danger" title="Удалить все клипы">Очистить</button>
+  </div>
+  <div id="timeline" class="timeline">
+    <div id="ruler" class="ruler"></div>
+    <div id="track" class="track"></div>
+    <div id="foley-track" class="foley-track"></div>
+    <div id="playhead" class="playhead"></div>
+  </div>
+</footer>
+
+<aside id="foley-drawer" class="foley-drawer hidden">
+  <div class="foley-head">
+    <h2>🎙 Foley — синхронизация звука</h2>
+    <button id="foley-close" class="btn ghost tiny" title="Закрыть">✕</button>
+  </div>
+  <div id="foley-body" class="foley-body"></div>
+</aside>
+
+<input type="file" id="file-input" accept="video/*" multiple hidden>
+<input type="file" id="project-input" accept=".json,application/json" hidden>
+
+<script>
+(()=>{var wn=Object.defineProperty;var X=(t,n,o)=>()=>{if(o)throw o[0];try{return t&&(n=t(t=0)),n}catch(e){throw o=[e],e}};var En=(t,n)=>{for(var o in n)wn(t,o,{get:n[o],enumerable:!0})};function _(){let t=l.settings.crossfade,n=[],o=0;for(let e of l.clips){let i=Math.max(.05,e.out-e.in),r=o;e.transitionIn==="crossfade"&&n.length>0&&(r=Math.max(0,o-t));let a=r+i;n.push({clip:e,start:r,end:a,dur:i}),o=a}return n}function At(t){let n=l.clips.findIndex(e=>e.id===t);if(n===-1)return;let[o]=l.clips.splice(n,1);o._video&&(o._video.pause(),o._video.removeAttribute("src"),o._video.load()),l.selectedClipId===t&&rt(null),h.emit(y.CLIPS)}function rt(t){l.selectedClipId=t,h.emit(y.SELECT,t)}function Pt(t){l.selectedFoleyId=t,h.emit(y.FOLEY,t)}function Wt(t,n){let o=l.foley.find(e=>e.id===t);o&&(Object.assign(o,n),h.emit(y.FOLEY))}function Le(t){let n=l.foley.findIndex(o=>o.id===t);n!==-1&&l.foley.splice(n,1),l.selectedFoleyId===t&&(l.selectedFoleyId=null),h.emit(y.FOLEY)}function Ie(){l.foley=[],l.selectedFoleyId=null,h.emit(y.FOLEY)}var l,Me,kn,Q,h,y,T,R,ft,j,U=X(()=>{l={media:[],clips:[],foley:[],foleyDetected:{},foleyGain:.9,selectedFoleyId:null,selectedClipId:null,settings:{width:1280,height:720,fps:30,crossfade:.5},time:0,playing:!1},Me={none:"\u0411\u0435\u0437 \u043F\u0435\u0440\u0435\u0445\u043E\u0434\u0430",crossfade:"\u041A\u0440\u043E\u0441\u0441\u0444\u0435\u0439\u0434",fadeblack:"\u0427\u0435\u0440\u0435\u0437 \u0447\u0451\u0440\u043D\u044B\u0439"},kn=0,Q=(t="id")=>`${t}${(++kn).toString(36)}${Math.random().toString(36).slice(2,6)}`,h={_map:new Map,on(t,n){this._map.has(t)||this._map.set(t,new Set),this._map.get(t).add(n)},emit(t,n){(this._map.get(t)||[]).forEach(o=>o(n))}},y={MEDIA:"media-changed",CLIPS:"clips-changed",SELECT:"selection-changed",TIME:"time-changed",PLAY:"play-changed",FOLEY:"foley-changed"},T=(t,n,o)=>Math.min(o,Math.max(n,t));R=()=>{let t=_();return t.length?t[t.length-1].end:0},ft=t=>l.clips.find(n=>n.id===t)||null,j=t=>l.media.find(n=>n.id===t)||null});function M(t,n=!0){(!isFinite(t)||t<0)&&(t=0);let o=Math.floor(t/60),e=Math.floor(t%60),i=`${String(o).padStart(2,"0")}:${String(e).padStart(2,"0")}`;return n?`${i}.${Math.floor(t%1*10)}`:i}function v(t,{type:n="",timeout:o=4200,html:e=!1}={}){vt||(vt=document.createElement("div"),vt.id="toasts",document.body.appendChild(vt));let i=document.createElement("div");return i.className=`toast ${n}`.trim(),e?i.innerHTML=t:i.textContent=t,vt.appendChild(i),setTimeout(()=>{i.style.transition="opacity .25s",i.style.opacity="0",setTimeout(()=>i.remove(),260)},o),i}function d(t,n={},...o){let e=document.createElement(t);for(let[i,r]of Object.entries(n))i==="class"?e.className=r:i==="dataset"?Object.assign(e.dataset,r):i.startsWith("on")&&typeof r=="function"?e.addEventListener(i.slice(2),r):i==="html"?e.innerHTML=r:e.setAttribute(i,r);return o.flat().forEach(i=>e.append(i?.nodeType?i:document.createTextNode(i??""))),e}var vt,H=X(()=>{vt=null});function Ce(t){Xt=t}function kt(){if(Y)return Y;let t=window.AudioContext||window.webkitAudioContext;return t?(Y=new t,Et=Y.createGain(),Et.connect(Y.destination),Jt=Y.createMediaStreamDestination(),Et.connect(Jt),Y):null}function Se(){return kt(),Jt}function Fe(){return kt(),Et}function tt(){return kt()}function Mn(){Y&&Y.state==="suspended"&&Y.resume()}function Te(t){let n=kt();if(!n||!t._video)return null;if(t._gain)return t._gain;if(t._video.readyState<1)return t._video.addEventListener("loadeddata",()=>Te(t),{once:!0}),null;try{let o=n.createMediaElementSource(t._video),e=n.createGain();return e.gain.value=t.volume??1,o.connect(e),e.connect(Et),t._gain=e,t._video.muted=!1,e}catch(o){return console.warn("audio chain failed",o),null}}function $e(t){t._gain&&(t._gain.gain.value=t.volume??1)}function Qt(t){if(t._video)return t._video;let n=j(t.mediaId),o=document.createElement("video");return o.src=n?.url||"",o.preload="auto",o.playsInline=!0,o.muted=!0,o.addEventListener("seeked",()=>{l.playing||pt(l.time)}),t._video=o,o}function Ae(t){wt=t,J=wt.getContext("2d"),te(),pt(l.time)}function te(){wt&&(wt.width=l.settings.width,wt.height=l.settings.height,pt(l.time))}function pt(t){if(!J)return;let{width:n,height:o}=l.settings;J.fillStyle="#000",J.fillRect(0,0,n,o);let i=_().filter(c=>t>=c.start&&t<c.end),r=new Set;for(let c of i){let s=c.clip;r.add(s.id);let u=Qt(s),f=T(t-c.start+s.in,0,Math.max(0,(j(s.mediaId)?.duration||s.out)-.02));if(u.readyState>=1&&Math.abs(u.currentTime-f)>.3)try{u.currentTime=f}catch{}let p=1;s.transitionIn==="crossfade"&&c!==i[0]?p=T((t-c.start)/l.settings.crossfade,0,1):s.transitionIn==="fadeblack"&&(p=T((t-c.start)/l.settings.crossfade,0,1)),Te(s),Ln(u,p)}for(let c of l.clips)c._video&&!r.has(c.id)&&!c._video.paused&&c._video.pause();let a=R();a>0&&t>a-.05&&(J.fillStyle=`rgba(0,0,0,${T((a-t)/.05,0,1)})`,J.fillRect(0,0,n,o))}function Ln(t,n){if(!t.videoWidth||t.readyState<2)return;let{width:o,height:e}=l.settings,i=Math.max(o/t.videoWidth,e/t.videoHeight),r=t.videoWidth*i,a=t.videoHeight*i;J.globalAlpha=n,J.drawImage(t,(o-r)/2,(e-a)/2,r,a),J.globalAlpha=1}function Pe(){return l.playing}function Mt(){let t=R();if(!(t<=0)){l.time>=t-.01&&S(0),kt(),Mn(),l.playing=!0,Kt=l.time,Zt=performance.now(),Rt=l.time;for(let n of _())l.time>=n.start&&l.time<n.end&&Qt(n.clip).play().catch(()=>{});h.emit(y.PLAY,!0),cancelAnimationFrame(Dt),Dt=requestAnimationFrame(De)}}function De(t){if(!l.playing)return;let n=R(),o=Kt+(t-Zt)/1e3;if(o>=n){l.time=n,pt(n),Lt(),h.emit(y.TIME,l.time);return}if(l.time=o,pt(o),Re(o),Xt){let e=Rt;Rt=o,Xt(e,o)}h.emit(y.TIME,o),Dt=requestAnimationFrame(De)}function Re(t){let n=_().filter(e=>t>=e.start&&t<e.end),o=new Set(n.map(e=>e.clip.id));for(let e of n){let i=Qt(e.clip),r=T(t-e.start+e.clip.in,0,1e9);if(i.readyState>=1&&Math.abs(i.currentTime-r)>.3)try{i.currentTime=r}catch{}i.paused&&i.play().catch(()=>{})}for(let e of l.clips)e._video&&!o.has(e.id)&&!e._video.paused&&e._video.pause()}function Lt(){l.playing=!1,cancelAnimationFrame(Dt);for(let t of l.clips)t._video&&!t._video.paused&&t._video.pause();h.emit(y.PLAY,!1)}function ee(){l.playing?Lt():Mt()}function S(t){let n=R();l.time=T(t,0,n),Rt=l.time,l.playing?(Kt=l.time,Zt=performance.now(),Re(l.time)):pt(l.time),h.emit(y.TIME,l.time)}function Be(){let t=l.time,o=_().find(c=>t>c.start+.08&&t<c.end-.08);if(!o)return{ok:!1,reason:"\u041F\u043E\u0441\u0442\u0430\u0432\u044C\u0442\u0435 playhead \u0432\u043D\u0443\u0442\u0440\u044C \u043A\u043B\u0438\u043F\u0430"};let e=t-o.start+o.clip.in,i={...o.clip,out:e},r={...o.clip,id:o.clip.id+"_b"+Math.random().toString(36).slice(2,6),in:e,transitionIn:"none"},a=l.clips.findIndex(c=>c.id===o.clip.id);return l.clips.splice(a,1,i,r),h.emit(y.CLIPS),{ok:!0}}var wt,J,Dt,Kt,Zt,Rt,Xt,Y,Et,Jt,st=X(()=>{U();wt=null,J=null,Dt=null,Kt=0,Zt=0,Rt=0,Xt=null;Y=null,Et=null,Jt=null});function Cn(t){let n=t>>>0;return()=>{n|=0,n=n+1831565813|0;let o=Math.imul(n^n>>>15,1|n);return o=o+Math.imul(o^o>>>7,61|o)^o,((o^o>>>14)>>>0)/4294967296}}function Sn(t,n){let o=new Float32Array(t);for(let e=0;e<t;e++)o[e]=n()*2-1;return o}function ht(t,n,o,e=0){let i=new Float32Array(t);for(let r=0;r<t;r++){let a=r/o;i[r]=Math.sin(2*Math.PI*n*a)*(e?Math.exp(-a/e):1)}return i}function yt(t,n,o){let e=1-Math.exp(-2*Math.PI*n/o),i=0;for(let r=0;r<t.length;r++)i+=e*(t[r]-i),t[r]=i;return t}function Bt(t,n,o){let e=1-Math.exp(-2*Math.PI*n/o),i=0;for(let r=0;r<t.length;r++)i+=e*(t[r]-i),t[r]-=i;return t}function ne(t,n,o,e){return yt(Bt(t,n,e),o,e)}function Fn(t,n,o,e){let i=0,r=t.length;for(let a=0;a<r;a++){let c=r>1?a/(r-1):0,s=Math.sin(Math.PI*c),u=n+(o-n)*s,f=1-Math.exp(-2*Math.PI*u/e);i+=f*(t[a]-i),t[a]=i}return t}function q(t,n,o){let e=new Float32Array(t);for(let i=0;i<t;i++)e[i]=Math.exp(-i/(n*o));return e}function G(t,n){for(let o=0;o<t.length;o++)t[o]*=n;return t}function $(t,n,o=1){for(let e=0;e<t.length;e++)t[e]+=n[e]*o;return t}function W(t,n){for(let o=0;o<t.length;o++)t[o]*=n[o];return t}function Tn(t,n,o=3){let e=Math.min(t.length,Math.floor(o/1e3*n));for(let i=0;i<e;i++){let r=i/e;t[i]*=r,t[t.length-1-i]*=r}return t}function $n(t,n=.85){let o=0;for(let e=0;e<t.length;e++)o=Math.max(o,Math.abs(t[e]));return o>1e-6&&G(t,n/o),t}function Oe(t,n=48e3,o=1){let e=n,i=Math.max(1,Math.floor((In[t]??.2)*e)),r=Cn(o*2654435761),a=new Float32Array(i),c=()=>Sn(i,r);switch(t){case"step":{let s=W(yt(c(),380,e),q(i,.045,e));G(s,.7),$(a,s),$(a,ht(i,62,e,.07),.8);break}case"step_soft":{let s=W(yt(c(),750,e),q(i,.03,e));G(s,.55),$(a,s),$(a,ht(i,95,e,.035),.35);break}case"heel":{let s=W(yt(c(),560,e),q(i,.022,e));G(s,.75),$(a,s),$(a,ht(i,110,e,.03),.4);break}case"thud":{$(a,ht(i,48,e,.1),.95);let s=W(yt(c(),220,e),q(i,.05,e));$(a,G(s,.5));break}case"cloth":{let s=W(ne(c(),900,3200,e),q(i,.09,e));$(a,G(s,.65));break}case"rustle":{let s=W(ne(c(),1800,5200,e),q(i,.16,e));for(let u=0;u<i;u++)s[u]*=.6+.4*Math.sin(2*Math.PI*3.1*u/e);$(a,G(s,.5));break}case"tap":{let s=W(ne(c(),1400,4200,e),q(i,.018,e));$(a,G(s,.6)),$(a,ht(i,880,e,.012),.2);break}case"whoosh":{let s=Fn(Bt(c(),200,e),260,2800,e);for(let u=0;u<i;u++){let f=i>1?u/(i-1):0;s[u]*=Math.pow(Math.sin(Math.PI*f),.8)}$(a,G(s,.6));break}case"click":{let s=W(Bt(c(),2800,e),q(i,.007,e));$(a,G(s,.8));break}case"object":{let s=[{f:523.25,tau:.05,k:.5},{f:1050.686,tau:.08,k:.3},{f:1555.456,tau:.12,k:.18}];for(let f of s)$(a,ht(i,f.f,e,f.tau),f.k);let u=W(Bt(c(),4e3,e),q(i,.006,e));$(a,G(u,.35));break}default:$(a,G(W(yt(c(),600,e),q(i,.05,e)),.7))}return{sampleRate:e,duration:i/e,data:$n(Tn(a,e))}}function _t(t,n,o=0){let e=o;return t==="low"?n>.55?e%2?"thud":"step":e%3===0?"step_soft":"heel":t==="high"?e%2?"click":"object":e%2?"cloth":"rustle"}var It,Ot,In,Nt=X(()=>{It=[{id:"step",label:"\u0428\u0430\u0433",icon:"\u{1F45F}",cat:"low"},{id:"step_soft",label:"\u0428\u0430\u0433 \u0442\u0438\u0445\u0438\u0439",icon:"\u{1F9E6}",cat:"low"},{id:"heel",label:"\u041A\u0430\u0431\u043B\u0443\u043A",icon:"\u{1F460}",cat:"low"},{id:"thud",label:"\u041F\u0440\u0435\u0434\u043C\u0435\u0442 (\u0442\u0443\u0434\u0443)",icon:"\u{1F4E6}",cat:"low"},{id:"cloth",label:"\u0422\u043A\u0430\u043D\u044C / \u0440\u0443\u043A\u0438",icon:"\u{1F455}",cat:"mid"},{id:"rustle",label:"\u0428\u0435\u043B\u0435\u0441\u0442",icon:"\u{1F343}",cat:"mid"},{id:"tap",label:"\u041A\u0430\u0441\u0430\u043D\u0438\u0435",icon:"\u261D\uFE0F",cat:"mid"},{id:"whoosh",label:"\u0412\u0437\u043C\u0430\u0445 \u0440\u0443\u043A\u0438",icon:"\u{1F4A8}",cat:"mid"},{id:"click",label:"\u041A\u043B\u0438\u043A / \u0449\u0435\u043B\u0447\u043E\u043A",icon:"\u{1F5B1}\uFE0F",cat:"high"},{id:"object",label:"\u041C\u0435\u0442\u0430\u043B\u043B / \u043F\u043B\u0430\u0441\u0442\u0438\u043A",icon:"\u{1F527}",cat:"high"}],Ot=t=>It.find(n=>n.id===t)||It[0],In={step:.25,step_soft:.16,heel:.15,thud:.3,cloth:.28,rustle:.45,tap:.09,whoosh:.42,click:.06,object:.4}});function _e(t,n){let o=t.length;if(o!==n.length)throw new Error("fft: \u0434\u043B\u0438\u043D\u044B \u043C\u0430\u0441\u0441\u0438\u0432\u043E\u0432 \u043D\u0435 \u0441\u043E\u0432\u043F\u0430\u0434\u0430\u044E\u0442");if(o<2||(o&o-1)!==0)throw new Error("fft: n \u0434\u043E\u043B\u0436\u043D\u043E \u0431\u044B\u0442\u044C \u0441\u0442\u0435\u043F\u0435\u043D\u044C\u044E \u0434\u0432\u043E\u0439\u043A\u0438");for(let e=1,i=0;e<o;e++){let r=o>>1;for(;i&r;r>>=1)i^=r;if(i^=r,e<i){let a=t[e];t[e]=t[i],t[i]=a;let c=n[e];n[e]=n[i],n[i]=c}}for(let e=2;e<=o;e<<=1){let i=-2*Math.PI/e,r=Math.cos(i),a=Math.sin(i),c=e>>1;for(let s=0;s<o;s+=e){let u=1,f=0;for(let p=0;p<c;p++){let m=t[s+p],x=n[s+p],w=t[s+p+c],C=n[s+p+c],P=w*u-C*f,B=w*f+C*u;t[s+p]=m+P,n[s+p]=x+B,t[s+p+c]=m-P,n[s+p+c]=x-B;let N=u*r-f*a;f=u*a+f*r,u=N}}}}function Ne(t){let n=new Float32Array(t);for(let o=0;o<t;o++)n[o]=.5-.5*Math.cos(2*Math.PI*o/(t-1));return n}var je=X(()=>{});function ze(t,n,o={}){let{sensitivity:e=1,minGap:i=.12,maxEvents:r=400,frameSize:a=1024,hop:c=512}=o,s=t.length;if(s<a*4||n<=0)return[];let u=Ne(a),f=a/2+1,p=n/a,m=Math.max(1,Math.floor(An/p)),x=Math.min(f-1,Math.ceil(Pn/p)),w=Math.floor((s-a)/c)+1,C=new Float32Array(w),P=new Float32Array(w),B=new Float32Array(w),N=new Float32Array(w),V=new Float32Array(a),b=new Float32Array(a),L=new Float32Array(f);for(let D=0;D<w;D++){let Z=D*c;for(let F=0;F<a;F++)V[F]=t[Z+F]*u[F];b.fill(0),_e(V,b);let ut=0,xt=0,bt=0;for(let F=1;F<f;F++){let ke=Math.hypot(V[F],b[F]),qt=Math.max(0,ke-L[F]);ut+=qt,F<=m?xt+=qt:F>=x&&(bt+=qt),L[F]=ke}C[D]=ut,P[D]=xt,B[D]=bt,N[D]=(Z+a/2)/n}let g=oe(C),E=Ge(C,.9),k=Ge(C,.95),it=oe(P)||1e-9,O=oe(B)||1e-9,at=Math.max(1e-9,...C),bn=g+e*Math.max(E-g,at*.01),vn=Math.max(at*.04,g*1.5),Yt=[],Ee=-1/0;for(let D=1;D<w-1;D++){let Z=C[D];if(Z<bn||Z<vn||Z<=C[D-1]||Z<C[D+1])continue;let ut=N[D];if(ut-Ee<i)continue;let xt=P[D]/it,bt=B[D]/O,F="mid";if(xt>1.6*bt?F="low":bt>1.6*xt&&(F="high"),Yt.push({time:ut,band:F,strength:Dn((Z-g)/Math.max(k-g,1e-9))}),Ee=ut,Yt.length>=r)break}return Yt}function Ve(t,n){let o=new Float32Array(n);if(!t.length)return o;for(let e of t)for(let i=0;i<n;i++)o[i]+=e[i];if(t.length>1){let e=1/t.length;for(let i=0;i<n;i++)o[i]*=e}return o}function oe(t){if(!t.length)return 0;let n=Float32Array.from(t).sort(),o=n.length>>1;return n.length%2?n[o]:(n[o-1]+n[o])/2}function Ge(t,n){if(!t.length)return 0;let o=Float32Array.from(t).sort(),e=Rn(Math.floor(n*(o.length-1)),0,o.length-1);return o[e]}var An,Pn,Dn,Rn,Ue=X(()=>{je();An=160,Pn=1500;Dn=t=>t<0?0:t>1?1:t,Rn=(t,n,o)=>t<n?n:t>o?o:t});function Bn(){let t=Fe(),n=tt();return!t||!n?null:et||(et=n.createGain(),et.gain.value=l.foleyGain,et.connect(t),et)}function He(t){l.foleyGain=T(t,0,2),et&&(et.gain.value=l.foleyGain),h.emit(y.FOLEY)}function On(t){let n=tt();if(!n)return null;if(ie.has(t))return ie.get(t);let o=Oe(t,n.sampleRate,1),e=n.createBuffer(1,o.data.length,n.sampleRate);return e.copyToChannel(o.data,0),ie.set(t,e),e}async function ae(t,n={},o){let e=j(t);if(!e)return[];let{sensitivity:i=1,minGap:r=.12}=n;e.file&&e.file.size>200*1024*1024&&v("\u0424\u0430\u0439\u043B \u0431\u043E\u043B\u044C\u0448\u0435 200 \u041C\u0411 \u2014 \u0430\u043D\u0430\u043B\u0438\u0437 \u043C\u043E\u0436\u0435\u0442 \u0437\u0430\u043D\u044F\u0442\u044C \u043C\u0438\u043D\u0443\u0442\u044B",{timeout:8e3});try{o?.("decode");let a=await e.file.arrayBuffer(),s=await tt().decodeAudioData(a);o?.("analyze"),await new Promise(m=>setTimeout(m,0));let u=[];for(let m=0;m<s.numberOfChannels;m++)u.push(s.getChannelData(m));let f=Ve(u,s.length),p=ze(f,s.sampleRate,{sensitivity:i,minGap:r});return l.foleyDetected[t]=p,h.emit(y.FOLEY,{mediaId:t,stage:"done",count:p.length}),p}catch(a){return console.error(a),v(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0440\u0430\u0437\u043E\u0431\u0440\u0430\u0442\u044C \u0437\u0432\u0443\u043A: ${a.message||a}. \u0424\u043E\u0440\u043C\u0430\u0442 \u043C\u043E\u0436\u0435\u0442 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C\u0441\u044F \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u043E\u043C.`,{type:"error",timeout:9e3}),h.emit(y.FOLEY,{mediaId:t,stage:"error"}),[]}}function Ye(t,{autoAssign:n=!0}={}){let o=l.foleyDetected[t];if(!o?.length)return v("\u0421\u043D\u0430\u0447\u0430\u043B\u0430 \u043F\u0440\u043E\u0430\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u0430\u0443\u0434\u0438\u043E",{type:"error"}),0;let e=_(),i=R(),r=[],a=0;for(let c of e)if(c.clip.mediaId===t)for(let s of o){if(s.time<c.clip.in||s.time>c.clip.out)continue;let u=c.start+(s.time-c.clip.in);u<0||u>i||r.push({id:Q("f"),time:u,sfx:n?_t(s.band,s.strength,a++):"tap",gain:1,offset:0,band:s.band,strength:s.strength,detected:!0})}return r.length?(l.foley.push(...r),h.emit(y.FOLEY),v(`\u0420\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u043E \u0444\u043E\u043B\u0438-\u0441\u043E\u0431\u044B\u0442\u0438\u0439: ${r.length}`),r.length):(v("\u042D\u0442\u043E\u0442 \u0444\u0430\u0439\u043B \u043D\u0435 \u0438\u0441\u043F\u043E\u043B\u044C\u0437\u0443\u0435\u0442\u0441\u044F \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D\u0435 \u2014 \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043A\u043B\u0438\u043F \u0438\u0437 \u043D\u0435\u0433\u043E",{type:"error"}),0)}function re(t,n,{drift:o=0,gain:e=1,seed:i=null}={}){let r=tt(),a=Bn(),c=On(t);if(!r||!a||!c)return;let s=r.createBufferSource();s.buffer=c,s.playbackRate=.93+Math.random()*.14;let u=r.createGain();u.gain.value=T(e,0,4),s.connect(u),u.connect(a);let f=Math.min(Math.max(o,0),Math.max(0,c.duration-.005));try{s.start(n,f)}catch{s.start(n)}s.onended=()=>{try{u.disconnect()}catch{}}}function qe(t,n){if(!l.playing||!l.foley.length||!(n>t)||n-t>.5)return;let o=tt();if(!o)return;let e=o.currentTime+.02;for(let i of l.foley){let r=i.time+i.offset;r>t&&r<=n&&re(i.sfx,e,{drift:n-r,gain:(i.gain??1)*l.foleyGain})}}function jt(t){let n=tt();n&&(S(t.time+t.offset),re(t.sfx,n.currentTime+.02,{gain:(t.gain??1)*l.foleyGain}))}function We(t){let n=tt();n&&re(t,n.currentTime+.02,{gain:l.foleyGain})}function se(t,n){let o=l.foley.find(e=>e.id===t);o&&(o.offset=T((o.offset??0)+n,-5,5),h.emit(y.FOLEY))}var et,ie,Xe,Gt=X(()=>{U();Ue();Nt();st();H();et=null,ie=new Map;Xe=(t=l.settings.fps)=>1/t});var ue={};En(ue,{appendMedia:()=>zn,deleteSelected:()=>de,initTimeline:()=>ce,render:()=>nt});function zn(t){let n=en(t);n&&(l.clips.push(n),rt(n.id),h.emit(y.CLIPS))}function ce(){h.on(y.CLIPS,nt),h.on(y.MEDIA,nt),h.on(y.SELECT,nt),h.on(y.TIME,tn),h.on(y.FOLEY,nt),window.addEventListener("resize",()=>nt()),document.getElementById("zoom-in").addEventListener("click",()=>Je(1.25)),document.getElementById("zoom-out").addEventListener("click",()=>Je(.8));let t=n=>{let o=zt().getBoundingClientRect(),e=(n.clientX-o.left)/A;S(e)};zt().addEventListener("pointerdown",n=>{t(n);let o=i=>t(i),e=()=>{window.removeEventListener("pointermove",o),window.removeEventListener("pointerup",e)};window.addEventListener("pointermove",o),window.addEventListener("pointerup",e)}),z().addEventListener("pointerdown",n=>{n.target===z()&&rt(null)}),z().addEventListener("dragover",n=>{if(!ot)return;n.preventDefault();let o=_(),e=o[o.length-1];Ze(e?e.end*A:0)}),z().addEventListener("drop",n=>{if(!ot)return;n.preventDefault();let o=n.clientX-z().getBoundingClientRect().left+le().scrollLeft;Qe(ot,Ke(o)),Ct()}),nt()}function Je(t){A=T(Math.round(A*t),Nn,jn),nt()}function Ke(t){let n=_(),o=n.length;for(let e=0;e<n.length;e++){let i=(n[e].start+n[e].dur/2)*A;if(t<i){o=e;break}}return o}function nt(){let t=_(),n=R(),o=Math.max(n*A+40,le().clientWidth-2);zt().style.width=`${o}px`,z().style.width=`${o}px`,Vn(n,o),Un(t),Hn(n,o),tn(l.time),document.getElementById("timeline-info").textContent=`${l.clips.length} \u043A\u043B\u0438\u043F(\u043E\u0432) \xB7 ${M(n)}`,document.getElementById("stage-empty").classList.toggle("hidden",l.clips.length>0)}function Vn(t,n){let o=zt();o.textContent="";let i=[.5,1,2,5,10,15,30,60,120,300].find(a=>a*A>=70)||300;for(;t/i>400;)i*=2;let r=Math.max(t,n/A)+i;for(let a=0;a<=r;a+=i){o.append(d("div",{class:"ruler-tick major",style:`left:${a*A}px`}),d("div",{class:"ruler-label",style:`left:${a*A+4}px`},M(a,!1)));for(let c=1;c<4;c++){let s=a+i*c/4;if(s*A>n)break;o.append(d("div",{class:"ruler-tick",style:`left:${s*A}px`}))}}}function Un(t){let n=z();n.textContent="",Ct(),t.forEach((o,e)=>{let i=o.clip,r=j(i.mediaId),a=d("div",{class:`clip${i.id===l.selectedClipId?" selected":""}`,style:`left:${o.start*A}px;width:${Math.max(18,o.dur*A)}px`,draggable:"true",title:`${i.name}
+${M(i.in)} \u2192 ${M(i.out)} (\u0434\u043B\u0438\u0442. ${M(o.dur)})`});r?.thumb&&(a.style.backgroundImage=`url(${r.thumb})`),a.dataset.clipId=i.id;let c=i.transitionIn!=="none"?d("div",{class:"clip-badge",title:i.transitionIn==="crossfade"?"\u041A\u0440\u043E\u0441\u0441\u0444\u0435\u0439\u0434":"\u0427\u0435\u0440\u0435\u0437 \u0447\u0451\u0440\u043D\u044B\u0439"},i.transitionIn==="crossfade"?"\u21C4":"\u25D0"):d("div");a.append(d("div",{class:"clip-veil"}),d("div",{class:"clip-dur"},M(o.dur)),c,d("div",{class:"clip-label"},i.name||`\u041A\u043B\u0438\u043F ${e+1}`)),a.addEventListener("click",s=>{s.stopPropagation(),rt(i.id)}),a.addEventListener("dblclick",()=>{S(o.start),Mt()}),a.addEventListener("dragstart",s=>{ot=i.id,s.dataTransfer.effectAllowed="move",s.dataTransfer.setData("text/plain",i.id),setTimeout(()=>a.classList.add("dragging"),0)}),a.addEventListener("dragend",()=>{ot=null,a.classList.remove("dragging"),Ct()}),a.addEventListener("dragover",s=>{if(!ot)return;s.preventDefault(),s.stopPropagation();let u=a.getBoundingClientRect(),f=(s.clientX>u.left+u.width/2?u.right:u.left)-z().getBoundingClientRect().left;Ze(f)}),a.addEventListener("drop",s=>{if(!ot)return;s.preventDefault(),s.stopPropagation();let u=s.clientX-z().getBoundingClientRect().left+le().scrollLeft;Qe(ot,Ke(u)),Ct()}),n.append(a)})}function Ze(t){Ct(),z().append(d("div",{class:"clip-drop-marker",style:`left:${t}px`}))}function Ct(){z().querySelectorAll(".clip-drop-marker").forEach(t=>t.remove())}function Qe(t,n){if(!t)return;let o=l.clips.findIndex(r=>r.id===t);if(o===-1)return;let[e]=l.clips.splice(o,1),i=n>o?n-1:n;l.clips.splice(T(i,0,l.clips.length),0,e),h.emit(y.CLIPS)}function Hn(t,n){let o=document.getElementById("foley-track");if(o){if(o.style.width=`${n}px`,o.textContent="",!l.foley.length){o.append(d("div",{class:"foley-track-empty"},"\u0444\u043E\u043B\u0438-\u0441\u043B\u043E\u0439 \u043F\u0443\u0441\u0442 \u2014 \u043E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u043F\u0430\u043D\u0435\u043B\u044C \u{1F399} Foley"));return}for(let e of l.foley){let i=e.time+(e.offset??0);if(i*A>n)continue;let r=Ot(e.sfx),a=d("div",{class:`foley-mark${e.id===l.selectedFoleyId?" selected":""}${e.detected?" detected":""}`,style:`left:${i*A}px`,title:`${r.label} \xB7 ${M(i)} \xB7 \u0441\u0434\u0432\u0438\u0433 ${Math.round((e.offset??0)*1e3)} \u043C\u0441`},r.icon);a.addEventListener("click",c=>{c.stopPropagation(),Pt(e.id),S(i),jt(e)}),o.append(a)}}}function tn(t){Gn().style.left=`${t*A}px`;let n=R(),o=document.getElementById("scrub");o.value=n>0?String(Math.round(t/n*1e3)):"0",document.getElementById("time-display").textContent=`${M(t)} / ${M(n)}`}function de(){return l.selectedClipId?(At(l.selectedClipId),!0):!1}var A,Nn,jn,le,zt,z,Gn,ot,Vt=X(()=>{U();H();st();fe();Nt();Gt();A=70,Nn=16,jn=240,le=()=>document.getElementById("timeline"),zt=()=>document.getElementById("ruler"),z=()=>document.getElementById("track"),Gn=()=>document.getElementById("playhead"),ot=null});function qn(t){return Yn[t?.code]||"\u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430"}function pe(t,n,o){Ut.unshift({name:t,ok:n,message:o,at:Date.now()}),Ut.length>6&&Ut.pop(),h.emit(y.MEDIA)}async function St(t){let n=[...t].filter(e=>(e.type||"").startsWith("video/")||/\.(mp4|webm|mov|m4v|mkv|ogg|ogv)$/i.test(e.name||""));if(!n.length)return v("\u041D\u0443\u0436\u043D\u044B \u0432\u0438\u0434\u0435\u043E\u0444\u0430\u0439\u043B\u044B (mp4, webm, mov\u2026)",{type:"error"}),pe("\u2014",!1,"\u0432\u044B\u0431\u0440\u0430\u043D\u044B \u043D\u0435 \u0432\u0438\u0434\u0435\u043E\u0444\u0430\u0439\u043B\u044B"),[];let o=[];for(let e of n)try{let i=await Xn(e);o.push(i),pe(e.name,!0,`\u043E\u043A \xB7 ${Qn(i.duration)}${i.width?` \xB7 ${i.width}\xD7${i.height}`:""}`)}catch(i){console.error(i),pe(e.name,!1,i.message||String(i)),v(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0440\u043E\u0447\u0438\u0442\u0430\u0442\u044C \xAB${e.name}\xBB: ${i.message||i}`,{type:"error",timeout:9e3})}return o.length&&(l.media.push(...o),h.emit(y.MEDIA),v("\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E \u0432 \u043C\u0435\u0434\u0438\u0430\u0442\u0435\u043A\u0443. \u0422\u0435\u043F\u0435\u0440\u044C \u0434\u043E\u0431\u0430\u0432\u044C\u0442\u0435 \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D \u2014 \u043A\u043D\u043E\u043F\u043A\u0430 \xAB\u041D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D\xBB \u0438\u043B\u0438 \u0434\u0432\u043E\u0439\u043D\u043E\u0439 \u043A\u043B\u0438\u043A \u043F\u043E \u0444\u0430\u0439\u043B\u0443.")),o}function me(){if(!l.media.length)return v("\u041C\u0435\u0434\u0438\u0430\u0442\u0435\u043A\u0430 \u043F\u0443\u0441\u0442\u0430 \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0438\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u0432\u0438\u0434\u0435\u043E",{type:"error"}),0;let t=0;for(let n of l.media)l.clips.push({id:Q("c"),mediaId:n.id,name:n.name.replace(/\.[^.]+$/,""),in:0,out:n.duration>0?n.duration:5,transitionIn:"none",volume:1}),t++;return h.emit(y.CLIPS),t&&v(`\u041D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D\u043E \u043A\u043B\u0438\u043F\u043E\u0432: ${t}`),t}function Xn(t){return new Promise((n,o)=>{let e=URL.createObjectURL(t),i=document.createElement("video");i.preload="metadata",i.muted=!0,i.src=e;let r=c=>{i.removeAttribute("src"),URL.revokeObjectURL(e),o(new Error(c))},a=setTimeout(()=>r("\u0442\u0430\u0439\u043C\u0430\u0443\u0442 \u0447\u0442\u0435\u043D\u0438\u044F \u043C\u0435\u0442\u0430\u0434\u0430\u043D\u043D\u044B\u0445"),15e3);i.addEventListener("error",()=>{clearTimeout(a);let c=i.error?.code,s=qn(i.error);r(c===4?`${s}. ${Wn}`:s)}),i.addEventListener("loadedmetadata",async()=>{clearTimeout(a);let c=i.duration;isFinite(c)||(c=await new Promise(u=>{let f=setTimeout(()=>u(0),2500);i.addEventListener("durationchange",()=>{isFinite(i.duration)&&(clearTimeout(f),u(i.duration))}),i.currentTime=1e101,setTimeout(()=>{try{i.currentTime=0}catch{}},300)}));let s={id:Q("m"),name:t.name,url:e,file:t,duration:isFinite(c)&&c>0?c:0,width:i.videoWidth||0,height:i.videoHeight||0,thumb:""};s.thumb=await Jn(i),i.removeAttribute("src"),n(s)})})}function Jn(t){return new Promise(n=>{let o=!1,e=a=>{o||(o=!0,n(a))},i=Math.min(.25,(isFinite(t.duration)?t.duration:1)*.1),r=()=>{t.removeEventListener("seeked",r);try{let a=document.createElement("canvas"),c=160,s=Math.max(1,Math.round((t.videoHeight||90)*(c/(t.videoWidth||160))));a.width=c,a.height=s,a.getContext("2d").drawImage(t,0,0,c,s),e(a.toDataURL("image/jpeg",.65))}catch{e("")}};t.addEventListener("seeked",r);try{t.currentTime=i}catch{e("")}setTimeout(()=>e(""),5e3)})}function en(t,n=l.clips.length){let o=l.media.find(i=>i.id===t);if(!o)return null;let e=o.duration>0?o.duration:5;return{id:Q("c"),mediaId:t,name:o.name.replace(/\.[^.]+$/,""),in:0,out:e,transitionIn:"none",volume:1}}function Kn(t){nn=t,h.emit(y.MEDIA)}function he(){let t=document.getElementById("media-list");t.textContent="",document.getElementById("media-count").textContent=String(l.media.length);for(let n of Ut.slice(0,4)){let o=document.createElement("li");o.className="import-log-entry"+(n.ok?" ok":" bad"),o.title=n.message;let e=document.createElement("span");e.className="import-log-mark",e.textContent=n.ok?"\u2713":"\u2715";let i=document.createElement("div");i.className="import-log-body";let r=document.createElement("div");r.className="import-log-name",r.textContent=n.name;let a=document.createElement("div");a.className="import-log-msg",a.textContent=n.message,i.append(r,a),o.append(e,i),t.append(o)}if(!l.media.length){let n=document.createElement("li");n.className="muted small",n.style.padding="4px 6px",n.textContent="\u041C\u0435\u0434\u0438\u0430\u0442\u0435\u043A\u0430 \u043F\u0443\u0441\u0442\u0430. \u041D\u0435\u0442 \u0441\u0432\u043E\u0435\u0433\u043E \u0432\u0438\u0434\u0435\u043E? \u041D\u0430\u0436\u043C\u0438\u0442\u0435 \xAB\u0414\u0435\u043C\u043E-\u043A\u043B\u0438\u043F\xBB.",t.append(n);return}for(let n of l.media){let o=document.createElement("li");o.className="media-item"+(n.id===nn?" selected":""),o.title=`${n.name} \u2014 \u0434\u0432\u043E\u0439\u043D\u043E\u0439 \u043A\u043B\u0438\u043A, \u0447\u0442\u043E\u0431\u044B \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D`;let e=document.createElement("img");e.className="media-thumb",e.src=n.thumb,e.alt="",n.thumb||(e.style.background="#22262f");let i=document.createElement("div");i.className="media-meta";let r=document.createElement("div");r.className="media-name",r.textContent=n.name;let a=document.createElement("div");a.className="media-sub",a.textContent=`${Zn(n.duration)}${n.width?` \xB7 ${n.width}\xD7${n.height}`:""}`,i.append(r,a);let c=document.createElement("button");c.className="media-add",c.title="\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D",c.textContent="\uFF0B",c.addEventListener("click",s=>{s.stopPropagation(),Promise.resolve().then(()=>(Vt(),ue)).then(u=>u.appendMedia(n.id))}),o.append(e,i,c),o.addEventListener("click",()=>Kn(n.id)),o.addEventListener("dblclick",()=>{Promise.resolve().then(()=>(Vt(),ue)).then(s=>s.appendMedia(n.id))}),t.append(o)}}function Zn(t){if(!isFinite(t)||t<=0)return"\u0434\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430";let n=Math.floor(t/60),o=Math.round(t%60);return`${n}:${String(o).padStart(2,"0")}`}function Qn(t){return!isFinite(t)||t<=0?"\u0434\u043B\u0438\u0442. \u043D\u0435\u0438\u0437\u0432\u0435\u0441\u0442\u043D\u0430":`${t.toFixed(1)} \u0441`}var nn,Ut,Yn,Wn,fe=X(()=>{U();H();nn=null,Ut=[],Yn={1:"\u0437\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u043F\u0440\u0435\u0440\u0432\u0430\u043D\u0430",2:"\u0441\u0435\u0442\u0435\u0432\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430",3:"\u043E\u0448\u0438\u0431\u043A\u0430 \u0434\u0435\u043A\u043E\u0434\u0438\u0440\u043E\u0432\u0430\u043D\u0438\u044F",4:"\u0444\u043E\u0440\u043C\u0430\u0442 \u0438\u043B\u0438 \u043A\u043E\u0434\u0435\u043A \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u043E\u043C"};Wn="\u0411\u0440\u0430\u0443\u0437\u0435\u0440\u044B \u043E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u0442 mp4 (H.264 + AAC) \u0438 webm (VP8/VP9). mkv, ProRes, HEVC \u0438 avi \u043D\u0443\u0436\u043D\u043E \u043A\u043E\u043D\u0432\u0435\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C (HandBrake \u0438\u043B\u0438 ffmpeg)."});U();fe();H();function to(){let n=[],o=0;for(let i=1;i<8-.6;i+=1)n.push({time:i,strong:o%2===0}),o++;return{duration:8,steps:n,clicks:[{time:2.5},{time:5.5},{time:6.5}]}}function eo(){return["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm"].find(n=>MediaRecorder.isTypeSupported(n))||""}function no(t,n,o,e,i){t.fillStyle="#101318",t.fillRect(0,0,e,i),t.fillStyle="#1c2029",t.fillRect(0,i-60,e,60),t.strokeStyle="#2a2e38",t.lineWidth=2;for(let a=-(n*120%40);a<e;a+=40)t.beginPath(),t.moveTo(a,i-60),t.lineTo(a-20,i),t.stroke();let r=50+n/o.duration*(e-100);t.fillStyle="#ff7a2f",t.fillRect(r-13,i-118,26,58),t.beginPath(),t.arc(r,i-130,13,0,Math.PI*2),t.fill();for(let a of o.steps)Math.abs(n-a.time)<.07&&(t.fillStyle=a.strong?"rgba(255,255,255,.6)":"rgba(255,255,255,.3)",t.fillRect(0,0,e,i));t.fillStyle="#8b91a0",t.font="13px monospace",t.fillText(`MONTAG demo   ${n.toFixed(2)}s / ${o.duration}s`,12,22)}async function oo(t){let n=to(),o=640,e=360,i=30,r=document.createElement("canvas");r.width=o,r.height=e;let a=r.getContext("2d");if(!a||!r.captureStream||typeof MediaRecorder>"u")throw new Error("\u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442 \u0437\u0430\u043F\u0438\u0441\u044C \u0432\u0438\u0434\u0435\u043E (\u043D\u0443\u0436\u0435\u043D Chrome, Edge \u0438\u043B\u0438 Firefox)");let c=r.captureStream(0),s=c.getVideoTracks()[0];if(!s||typeof s.requestFrame!="function")throw new Error("\u0431\u0440\u0430\u0443\u0437\u0435\u0440 \u043D\u0435 \u043E\u0442\u0434\u0430\u043B \u0432\u0438\u0434\u0435\u043E-\u0434\u043E\u0440\u043E\u0436\u043A\u0443 canvas (captureStream) \u2014 \u0437\u0430\u043F\u0438\u0441\u044C \u043D\u0435\u0432\u043E\u0437\u043C\u043E\u0436\u043D\u0430");let u=window.AudioContext||window.webkitAudioContext;if(!u)throw new Error("Web Audio \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u0432 \u044D\u0442\u043E\u043C \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0435");let f=new u;await f.resume().catch(()=>{});let p=f.createMediaStreamDestination();p.stream.getAudioTracks().forEach(g=>c.addTrack(g));let m=f.currentTime+.15;for(let g of n.steps){let E=f.createOscillator(),k=f.createGain();E.type="sine",E.frequency.setValueAtTime(g.strong?58:78,m+g.time),E.frequency.exponentialRampToValueAtTime(38,m+g.time+.13),k.gain.setValueAtTime(1e-4,m+g.time),k.gain.exponentialRampToValueAtTime(g.strong?.85:.45,m+g.time+.012),k.gain.exponentialRampToValueAtTime(1e-4,m+g.time+.2),E.connect(k),k.connect(p),E.start(m+g.time),E.stop(m+g.time+.3)}for(let g of n.clicks){let E=f.createOscillator(),k=f.createGain();E.type="square",E.frequency.setValueAtTime(2100,m+g.time),k.gain.setValueAtTime(1e-4,m+g.time),k.gain.exponentialRampToValueAtTime(.25,m+g.time+.004),k.gain.exponentialRampToValueAtTime(1e-4,m+g.time+.05),E.connect(k),k.connect(p),E.start(m+g.time),E.stop(m+g.time+.08)}let x=eo(),w=new MediaRecorder(c,x?{mimeType:x}:void 0),C=[];w.ondataavailable=g=>g.data&&g.data.size&&C.push(g.data);let P=new Promise(g=>{w.onstop=g});t?.("\u0417\u0430\u043F\u0438\u0441\u044C \u0434\u0435\u043C\u043E-\u0441\u0446\u0435\u043D\u044B\u2026");let B=Math.max(16,Math.round(1e3/i)),N=0,V=g=>{no(a,g,n,o,e),N++,s&&typeof s.requestFrame=="function"&&s.requestFrame()};V(0),w.start(200);let b=performance.now();if(await new Promise(g=>{let E=0,k=()=>{clearTimeout(E),g()},it=()=>{let O=(performance.now()-b)/1e3;if(V(Math.min(O,n.duration)),O>=n.duration){k();return}setTimeout(it,B)};E=setTimeout(k,n.duration*1e3+6e3),setTimeout(it,B)}),V(n.duration),await new Promise(g=>setTimeout(g,250)),w.stop(),await P,f.close().catch(()=>{}),!C.length)throw new Error("\u0440\u0435\u043A\u043E\u0440\u0434\u0435\u0440 \u043D\u0435 \u043E\u0442\u0434\u0430\u043B \u0434\u0430\u043D\u043D\u044B\u0445");if(N<5)throw new Error("\u0437\u0430\u043F\u0438\u0441\u0430\u043D\u043E \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u043C\u0430\u043B\u043E \u043A\u0430\u0434\u0440\u043E\u0432 \u2014 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439\u0442\u0435 \u0432\u0435\u0440\u043D\u0443\u0442\u044C \u0432\u043A\u043B\u0430\u0434\u043A\u0443 \u043D\u0430 \u043F\u0435\u0440\u0435\u0434\u043D\u0438\u0439 \u043F\u043B\u0430\u043D");let L=new Blob(C,{type:w.mimeType||"video/webm"});return new File([L],"demo-footsteps.webm",{type:L.type})}function on(){let t=document.createElement("canvas");return{mediaRecorder:typeof MediaRecorder<"u",captureStream:typeof t.captureStream=="function",webm:typeof MediaRecorder<"u"&&MediaRecorder.isTypeSupported("video/webm"),audioContext:!!(window.AudioContext||window.webkitAudioContext),fileConstructor:typeof File=="function"}}async function an(t,n,o){o?.("\u0413\u0435\u043D\u0435\u0440\u0430\u0446\u0438\u044F \u0434\u0435\u043C\u043E-\u043A\u043B\u0438\u043F\u0430\u2026");let e=await oo(o),i=await t([e]);return i.length&&(n(),v("\u0414\u0435\u043C\u043E-\u043A\u043B\u0438\u043F \u0434\u043E\u0431\u0430\u0432\u043B\u0435\u043D: 8 \u0441, \u0448\u0430\u0433\u0438 \u043A\u0430\u0436\u0434\u0443\u044E \u0441\u0435\u043A\u0443\u043D\u0434\u0443 + \u0449\u0435\u043B\u0447\u043A\u0438. \u041E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 \u{1F399} Foley \u2192 \u0410\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C")),i}Vt();U();H();st();var ye=!1;function rn(){document.getElementById("inspector-body").addEventListener("pointerdown",()=>{ye=!0}),window.addEventListener("pointerup",()=>{supppressRenderSafe()&&(ye=!1,gt())}),h.on(y.SELECT,gt),h.on(y.CLIPS,()=>{ye||gt()}),h.on(y.MEDIA,gt),gt()}function gt(){let t=document.getElementById("inspector-body");t.textContent="";let n=ft(l.selectedClipId);if(!n){t.append(d("div",{class:"inspector-empty"},"\u041A\u043B\u0438\u043F \u043D\u0435 \u0432\u044B\u0431\u0440\u0430\u043D.",d("br"),d("br"),"\u041A\u043B\u0438\u043A\u043D\u0438\u0442\u0435 \u043A\u043B\u0438\u043F \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D\u0435, \u0447\u0442\u043E\u0431\u044B \u043F\u043E\u0434\u0440\u0435\u0437\u0430\u0442\u044C \u043A\u0440\u0430\u044F, \u0432\u044B\u0431\u0440\u0430\u0442\u044C \u043F\u0435\u0440\u0435\u0445\u043E\u0434 \u0438 \u0433\u0440\u043E\u043C\u043A\u043E\u0441\u0442\u044C.",d("br"),d("br"),"\u0414\u0432\u043E\u0439\u043D\u043E\u0439 \u043A\u043B\u0438\u043A \u043F\u043E \u043C\u0435\u0434\u0438\u0430 \u2014 \u0434\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D.",d("br"),"\u041F\u0440\u043E\u0431\u0435\u043B \u2014 \u043F\u0443\u0441\u043A/\u043F\u0430\u0443\u0437\u0430, S \u2014 \u0440\u0430\u0437\u0434\u0435\u043B\u0438\u0442\u044C, \u2190/\u2192 \u2014 \xB11 \u0441."));return}let o=j(n.mediaId),e=o?.duration>0?o.duration:Math.max(n.out,1),i=()=>_().find(m=>m.clip.id===l.selectedClipId)?.start??0;t.append(d("div",{class:"insp-title"},n.name||"\u041A\u043B\u0438\u043F"),d("div",{class:"muted small"},o?.name||"\u2014"));let r=d("b",{},M(n.in));t.append(d("div",{class:"insp-row"},d("div",{class:"insp-label"},"\u041D\u0430\u0447\u0430\u043B\u043E",r),ge({min:0,max:e,step:.05,value:n.in,onInput:m=>{let x=ft(l.selectedClipId);x&&(x.in=Math.min(m,x.out-.1),r.textContent=M(x.in),h.emit(y.CLIPS),l.time<x.in&&S(x.in))}})));let a=d("b",{},M(n.out)),c=d("b",{},M(n.out-n.in));t.append(d("div",{class:"insp-row"},d("div",{class:"insp-label"},"\u041A\u043E\u043D\u0435\u0446",a),ge({min:0,max:e,step:.05,value:n.out,onInput:m=>{let x=ft(l.selectedClipId);x&&(x.out=Math.max(m,x.in+.1),a.textContent=M(x.out),c.textContent=M(x.out-x.in),h.emit(y.CLIPS))}})),d("div",{class:"insp-row"},d("div",{class:"insp-label"},"\u0414\u043B\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u043A\u043B\u0438\u043F\u0430",c)));let s=d("select",{class:"select",style:"width:100%"});for(let[m,x]of Object.entries(Me)){let w=d("option",{value:m},x);n.transitionIn===m&&(w.selected=!0),s.append(w)}s.addEventListener("change",()=>{let m=ft(l.selectedClipId);m&&(m.transitionIn=s.value,h.emit(y.CLIPS),gt())}),t.append(d("div",{class:"insp-row"},d("div",{class:"insp-label"},"\u041F\u0435\u0440\u0435\u0445\u043E\u0434 \u0432\u0445\u043E\u0434\u044F\u0449\u0438\u043C"),s));let u=d("b",{},`${Math.round((n.volume??1)*100)}%`);t.append(d("div",{class:"insp-row"},d("div",{class:"insp-label"},"\u0413\u0440\u043E\u043C\u043A\u043E\u0441\u0442\u044C",u),ge({min:0,max:1.5,step:.05,value:n.volume??1,onInput:m=>{let x=ft(l.selectedClipId);x&&(x.volume=m,u.textContent=`${Math.round(m*100)}%`,$e(x))}})));let f=d("button",{class:"btn ghost"},"\u041F\u0435\u0440\u0435\u0439\u0442\u0438 \u043A \u043D\u0430\u0447\u0430\u043B\u0443 \u043A\u043B\u0438\u043F\u0430");f.addEventListener("click",()=>S(i()));let p=d("button",{class:"btn ghost danger"},"\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u043A\u043B\u0438\u043F");p.addEventListener("click",()=>At(l.selectedClipId)),t.append(f,p)}function ge({min:t,max:n,step:o,value:e,onInput:i}){let r=d("input",{type:"range",min:String(t),max:String(n),step:String(o),value:String(e)});return r.addEventListener("input",()=>i(parseFloat(r.value))),r}U();H();Gt();Nt();function io(t){let n=Math.max(0,Math.round(t)),o=[n&127],e=n>>7;for(;e>0;)o.unshift(e&127|128),e>>=7;return o}function sn(t){let n=[];for(let o of String(t)){let e=o.codePointAt(0);e<128?n.push(e):n.push(63)}return n}function ln(t,n={}){let{ppq:o=480,msPerTick:e=1,trackName:i="MONTAG FOLEY"}=n,r=1e3/e,a=Math.round(e*1e3*o),c=[];c.push(77,84,104,100),c.push(0,0,0,6),c.push(0,0),c.push(0,1),c.push(o>>8&255,o&255);let s=[],u=sn(i);s.push(0,255,3,u.length,...u),s.push(0,255,81,3,a>>16&255,a>>8&255,a&255),s.push(0,255,88,4,4,2,24,8);let f=[...t].filter(x=>Number.isFinite(x.time)&&x.time>=0).sort((x,w)=>x.time-w.time),p=0;for(let x of f){let w=Math.round(x.time*r),C=Math.max(0,w-p);p=w;let P=x.name??`marker ${x.time.toFixed(3)}s`,B=sn(P);s.push(...io(C),255,6,B.length,...B)}s.push(0,255,47,0),c.push(77,84,114,107);let m=s.length;return c.push(m>>24&255,m>>16&255,m>>8&255,m&255),c.push(...s),new Uint8Array(c)}st();var Ft=!1,Tt=1,$t=.12,xe="detected",Ht=0,K="",ct=null,be=150;function fn(){document.getElementById("foley-body").addEventListener("pointerdown",()=>{Ft=!0}),window.addEventListener("pointerup",()=>{Ft&&(Ft=!1,dt())}),h.on(y.FOLEY,()=>{Ft||dt()}),h.on(y.MEDIA,dt),h.on(y.CLIPS,dt),document.getElementById("foley-close").addEventListener("click",()=>{document.getElementById("foley-drawer").classList.add("hidden")}),dt()}function we(t,n){K=t,n&&(ct=n),Ft||dt()}function dt(){let t=document.getElementById("foley-body");if(!t)return;t.textContent="";let n=l.media.filter(b=>b.duration>0||b.file),o=ct&&j(ct)?ct:n[0]?.id;o&&!ct&&(ct=o);let e=o?l.foleyDetected[o]:null,i=d("select",{class:"select",style:"width:100%"});n.length||i.append(d("option",{value:""},"\u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u0438\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u0432\u0438\u0434\u0435\u043E \u2014"));for(let b of n){let L=d("option",{value:b.id},`${b.name} (${M(b.duration,!1)})`);b.id===o&&(L.selected=!0),i.append(L)}i.addEventListener("change",()=>{ct=i.value||null,K="",dt()});let r=d("button",{class:"btn primary",style:"width:100%"},K==="decode"||K==="analyze"?"\u23F3 \u0410\u043D\u0430\u043B\u0438\u0437\u2026":"\u{1F50D} \u0410\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0430\u0443\u0434\u0438\u043E");r.disabled=!o||K==="decode"||K==="analyze",r.addEventListener("click",async()=>{o&&(we("decode",o),await ae(o,{sensitivity:Tt,minGap:$t},b=>we(b,o)))});let a=d("div",{class:"foley-stat small muted"});if(K==="decode")a.textContent="\u0414\u0435\u043A\u043E\u0434\u0438\u0440\u0443\u044E \u0437\u0432\u0443\u043A\u043E\u0432\u0443\u044E \u0434\u043E\u0440\u043E\u0436\u043A\u0443\u2026";else if(K==="analyze")a.textContent="\u0418\u0449\u0443 \u043C\u043E\u043C\u0435\u043D\u0442\u044B \u043A\u043E\u043D\u0442\u0430\u043A\u0442\u0430\u2026";else if(K==="error")a.textContent="\u041E\u0448\u0438\u0431\u043A\u0430 \u0430\u043D\u0430\u043B\u0438\u0437\u0430 (\u0441\u043C. \u043F\u043E\u0434\u0441\u043A\u0430\u0437\u043A\u0443 \u043D\u0438\u0436\u0435)";else if(e?.length){let b=e.filter(E=>E.band==="low").length,L=e.filter(E=>E.band==="mid").length,g=e.filter(E=>E.band==="high").length;a.textContent=`\u041D\u0430\u0439\u0434\u0435\u043D\u043E ${e.length}: \u043D\u0438\u0437\u043A\u0438\u0445 (\u0448\u0430\u0433\u0438/\u043F\u0440\u0435\u0434\u043C\u0435\u0442\u044B) ${b} \xB7 \u0441\u0440\u0435\u0434\u043D\u0438\u0445 ${L} \xB7 \u0432\u044B\u0441\u043E\u043A\u0438\u0445 ${g}`}else a.textContent="\u0410\u043D\u0430\u043B\u0438\u0437 \u043D\u0435 \u0437\u0430\u043F\u0443\u0441\u043A\u0430\u043B\u0441\u044F";t.append(lt("1 \xB7 \u0418\u0441\u0442\u043E\u0447\u043D\u0438\u043A \u0437\u0432\u0443\u043A\u0430",i,r,a));let c=d("b",{},Tt.toFixed(1)),s=ve(.2,3,.1,Tt,b=>{Tt=b,c.textContent=b.toFixed(1),un(o)}),u=d("b",{},`${Math.round($t*1e3)} \u043C\u0441`),f=ve(.04,.5,.02,$t,b=>{$t=b,u.textContent=`${Math.round(b*1e3)} \u043C\u0441`,un(o)});t.append(lt("\u0427\u0443\u0432\u0441\u0442\u0432\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0441\u0442\u044C \u0438 \u043F\u043B\u043E\u0442\u043D\u043E\u0441\u0442\u044C",d("div",{class:"insp-label"},"\u041F\u043E\u0440\u043E\u0433 \u0434\u0435\u0442\u0435\u043A\u0442\u0430",c),s,d("div",{class:"insp-label"},"\u041C\u0438\u043D. \u0438\u043D\u0442\u0435\u0440\u0432\u0430\u043B",u),f));let p=d("button",{class:"btn",style:"width:100%"},"\u2B07 \u041F\u0435\u0440\u0435\u043D\u0435\u0441\u0442\u0438 \u0441\u043E\u0431\u044B\u0442\u0438\u044F \u043D\u0430 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D");p.disabled=!e?.length,p.addEventListener("click",()=>{o&&Ye(o,{autoAssign:!0})});let m=d("button",{class:"btn ghost danger",style:"width:100%"},"\u041E\u0447\u0438\u0441\u0442\u0438\u0442\u044C \u0444\u043E\u043B\u0438-\u0441\u043B\u043E\u0439");m.disabled=!l.foley.length,m.addEventListener("click",()=>{confirm("\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0432\u0441\u0435 \u0444\u043E\u043B\u0438-\u0441\u043E\u0431\u044B\u0442\u0438\u044F?")&&Ie()}),t.append(lt("2 \xB7 \u0420\u0430\u0437\u043C\u0435\u0449\u0435\u043D\u0438\u0435",p,m));let x=d("div",{class:"foley-events"});if(!l.foley.length)x.append(d("div",{class:"muted small"},"\u0421\u043E\u0431\u044B\u0442\u0438\u0439 \u043D\u0435\u0442. \u041F\u0440\u043E\u0430\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u0430\u0443\u0434\u0438\u043E \u0438 \u043F\u0435\u0440\u0435\u043D\u0435\u0441\u0438\u0442\u0435 \u043D\u0430\u0439\u0434\u0435\u043D\u043D\u044B\u0435 \u043C\u043E\u043C\u0435\u043D\u0442\u044B."));else{let b=l.foley.slice(0,be);for(let L of b)x.append(ao(L));l.foley.length>be&&x.append(d("div",{class:"muted small"},`\u2026\u0438 \u0435\u0449\u0451 ${l.foley.length-be}`))}t.append(lt(`3 \xB7 \u0421\u043E\u0431\u044B\u0442\u0438\u044F \u0444\u043E\u043B\u0438 (${l.foley.length})`,x));let w=d("div",{class:"foley-lib"});for(let b of It){let L=d("button",{class:"btn ghost foley-lib-btn",title:`\u041F\u0440\u043E\u0441\u043B\u0443\u0448\u0430\u0442\u044C: ${b.label}`},d("span",{class:"foley-lib-icon"},b.icon),d("span",{class:"small"},b.label));L.addEventListener("click",()=>We(b.id)),w.append(L)}t.append(lt("4 \xB7 \u0411\u0438\u0431\u043B\u0438\u043E\u0442\u0435\u043A\u0430 \u0444\u043E\u043B\u0438",w));let C=d("b",{},`${Math.round(l.foleyGain*100)}%`),P=d("input",{type:"number",class:"select",value:String(Ht),step:"0.001",style:"width:100%",title:"\u0421\u043C\u0435\u0449\u0435\u043D\u0438\u0435 \u043C\u0430\u0440\u043A\u0435\u0440\u043E\u0432 \u0432 \u0441\u0435\u043A\u0443\u043D\u0434\u0430\u0445 \u2014 \u0435\u0441\u043B\u0438 \u0432\u0438\u0434\u0435\u043E \u0432 \u043F\u0440\u043E\u0435\u043A\u0442\u0435 \u0441\u0442\u043E\u0438\u0442 \u043D\u0435 \u0441 \u043D\u0443\u043B\u044F"}),B=d("b",{},String(Ht));P.addEventListener("input",()=>{Ht=parseFloat(P.value)||0,B.textContent=P.value});let N=d("select",{class:"select",style:"width:100%"});for(let[b,L]of[["detected","\u041D\u0430\u0439\u0434\u0435\u043D\u043D\u044B\u0435 \u0441\u043E\u0431\u044B\u0442\u0438\u044F \u0438\u0441\u0442\u043E\u0447\u043D\u0438\u043A\u0430"],["placed","\u0420\u0430\u0437\u043C\u0435\u0449\u0451\u043D\u043D\u044B\u0435 \u0444\u043E\u043B\u0438-\u0441\u043E\u0431\u044B\u0442\u0438\u044F"]]){let g=d("option",{value:b},L);xe===b&&(g.selected=!0),N.append(g)}N.addEventListener("change",()=>{xe=N.value});let V=d("button",{class:"btn primary",style:"width:100%"},"\u21E9 \u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u043C\u0430\u0440\u043A\u0435\u0440\u043E\u0432 \u0432 MIDI (.mid)");V.addEventListener("click",()=>{let b=Ht,L=xe==="placed"?l.foley.map((O,at)=>({time:O.time+(O.offset??0)+b,name:`${String(at+1).padStart(2,"0")} ${O.sfx}`})):(e||[]).map((O,at)=>({time:O.time+b,name:`${String(at+1).padStart(2,"0")} ${O.time.toFixed(2)}s ${O.band} ${_t(O.band,O.strength,at)}`}));if(!L.length){v("\u041D\u0435\u0442 \u0441\u043E\u0431\u044B\u0442\u0438\u0439 \u0434\u043B\u044F \u044D\u043A\u0441\u043F\u043E\u0440\u0442\u0430 \u2014 \u0441\u043D\u0430\u0447\u0430\u043B\u0430 \u043F\u0440\u043E\u0430\u043D\u0430\u043B\u0438\u0437\u0438\u0440\u0443\u0439\u0442\u0435 \u0430\u0443\u0434\u0438\u043E \u0438\u043B\u0438 \u0440\u0430\u0437\u043C\u0435\u0441\u0442\u0438\u0442\u0435 \u0444\u043E\u043B\u0438",{type:"error"});return}let g=ln(L),E=new Blob([g],{type:"audio/midi"}),k=document.createElement("a"),it=`montag-markers-${(j(o)?.name||"project").replace(/\.[^.]+$/,"")}.mid`;k.href=URL.createObjectURL(E),k.download=it,document.body.appendChild(k),k.click(),k.remove(),setTimeout(()=>URL.revokeObjectURL(k.href),3e4),v(`${L.length} \u043C\u0430\u0440\u043A\u0435\u0440\u043E\u0432 \u2192 ${it}. \u0412 Cubase: File \u2192 Import \u2192 MIDI File (\u0432\u043A\u043B\u044E\u0447\u0438\u0442\u0435 Import Markers \u0432 \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0430\u0445)`)}),t.append(lt("\u042D\u043A\u0441\u043F\u043E\u0440\u0442 \u043C\u0430\u0440\u043A\u0435\u0440\u043E\u0432 \u0432 DAW",N,P,d("div",{class:"insp-label"},"\u0421\u043C\u0435\u0449\u0435\u043D\u0438\u0435, \u0441",B),P,V,d("div",{class:"muted small"},"\u041C\u0430\u0440\u043A\u0435\u0440\u044B \u043F\u0438\u0448\u0443\u0442\u0441\u044F \u0432 Standard MIDI File \u0441 \u0442\u043E\u0447\u043D\u043E\u0441\u0442\u044C\u044E 1 \u043C\u0441 \u2014 Cubase, Nuendo, Reaper, Ableton \u0438 Logic \u0438\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u0443\u044E\u0442 \u0438\u0445 \u043A\u0430\u043A \u043C\u0430\u0440\u043A\u0435\u0440\u044B \u043F\u0440\u043E\u0435\u043A\u0442\u0430 \u0434\u043B\u044F \u043F\u0440\u0438\u0432\u044F\u0437\u043A\u0438 \u043A\u043B\u0438\u043F\u043E\u0432."))),t.append(lt("5 \xB7 \u041C\u0438\u043A\u0448\u0435\u0440",d("div",{class:"insp-label"},"\u041E\u0431\u0449\u0430\u044F \u0433\u0440\u043E\u043C\u043A\u043E\u0441\u0442\u044C \u0444\u043E\u043B\u0438",C),ve(0,2,.05,l.foleyGain,b=>{He(b),C.textContent=`${Math.round(b*100)}%`})))}function ao(t){let n=Ot(t.sfx),o=d("div",{class:`foley-event${t.id===l.selectedFoleyId?" selected":""}`}),e=d("div",{class:"foley-event-time"},d("b",{},M(t.time+(t.offset??0))),d("span",{class:"muted small"},`${ro[t.band]??"\u2022"} ${Math.round((t.strength??0)*100)}%`)),i=d("select",{class:"select tiny-select"});for(let p of It){let m=d("option",{value:p.id},`${p.icon} ${p.label}`);p.id===t.sfx&&(m.selected=!0),i.append(m)}i.addEventListener("change",()=>Wt(t.id,{sfx:i.value})),i.addEventListener("click",p=>p.stopPropagation());let r=Xe(),a=d("span",{class:"muted small"},`${Math.round((t.offset??0)*1e3)} \u043C\u0441`),c=d("div",{class:"foley-nudge"},cn("\u22121\u043A",()=>{se(t.id,-r),a.textContent=`${Math.round((t.offset??0)*1e3)} \u043C\u0441`}),cn("+1\u043A",()=>{se(t.id,r),a.textContent=`${Math.round((t.offset??0)*1e3)} \u043C\u0441`}),a),s=d("input",{type:"range",min:"0",max:"1.5",step:"0.05",value:String(t.gain??1),class:"foley-gain"});s.addEventListener("input",()=>Wt(t.id,{gain:parseFloat(s.value)})),s.addEventListener("click",p=>p.stopPropagation());let u=d("button",{class:"btn ghost tiny",title:"\u041F\u0440\u043E\u0441\u043B\u0443\u0448\u0430\u0442\u044C \u0432 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D\u0435"},"\u25B6");u.addEventListener("click",p=>{p.stopPropagation(),jt(t)});let f=d("button",{class:"btn ghost tiny danger",title:"\u0423\u0434\u0430\u043B\u0438\u0442\u044C"},"\u2715");return f.addEventListener("click",p=>{p.stopPropagation(),Le(t.id)}),o.append(e,i,c,s,u,f),o.addEventListener("click",()=>{Pt(t.id),S(t.time+(t.offset??0))}),o}var ro={low:"\u{1F45F}",mid:"\u{1F455}",high:"\u{1F5B1}\uFE0F"};function cn(t,n){let o=d("button",{class:"btn ghost tiny",title:"\u0421\u0434\u0432\u0438\u0433 \u043D\u0430 \u043A\u0430\u0434\u0440"},t);return o.addEventListener("click",e=>{e.stopPropagation(),n()}),o}function lt(t,...n){return d("div",{class:"foley-section"},d("div",{class:"foley-section-title"},t),...n)}function ve(t,n,o,e,i){let r=d("input",{type:"range",min:String(t),max:String(n),step:String(o),value:String(e),style:"width:100%"});return r.addEventListener("input",()=>i(parseFloat(r.value))),r}var dn=null;function un(t){clearTimeout(dn),dn=setTimeout(()=>{t&&ae(t,{sensitivity:Tt,minGap:$t},n=>we(n,t))},350)}Gt();st();U();st();H();var so=["video/webm;codecs=vp9,opus","video/webm;codecs=vp8,opus","video/webm;codecs=vp9","video/webm"];function lo(){return typeof MediaRecorder>"u"?null:so.find(t=>MediaRecorder.isTypeSupported(t))||null}async function co({onProgress:t}={}){let n=R();if(n<=0)return v("\u0422\u0430\u0439\u043C\u043B\u0430\u0439\u043D \u043F\u0443\u0441\u0442 \u2014 \u043D\u0435\u0447\u0435\u0433\u043E \u044D\u043A\u0441\u043F\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C",{type:"error"}),null;let o=lo();if(!o)return v("\u0411\u0440\u0430\u0443\u0437\u0435\u0440 \u043D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442 MediaRecorder (\u043D\u0443\u0436\u0435\u043D Chrome, Edge \u0438\u043B\u0438 Firefox)",{type:"error",timeout:8e3}),null;let e=document.getElementById("canvas"),i=l.settings.fps,r=e.captureStream(i),a=Se();a&&a.stream.getAudioTracks().forEach(f=>r.addTrack(f));let c=new MediaRecorder(r,{mimeType:o,videoBitsPerSecond:1e7}),s=[];c.ondataavailable=f=>f.data&&f.data.size&&s.push(f.data);let u=new Promise(f=>{c.onstop=f});return Lt(),S(0),c.start(250),Mt(),await new Promise(f=>{let p=()=>{t?.(Math.min(1,l.time/n)),Pe()?requestAnimationFrame(p):f()};requestAnimationFrame(p)}),c.stop(),await u,t?.(1),s.length?new Blob(s,{type:o}):(v("\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0437\u0430\u043F\u0438\u0441\u0430\u0442\u044C \u043F\u043E\u0442\u043E\u043A",{type:"error"}),null)}function uo(t,n){let o=URL.createObjectURL(t),e=document.createElement("a");e.href=o,e.download=n,document.body.appendChild(e),e.click(),e.remove(),setTimeout(()=>URL.revokeObjectURL(o),6e4)}async function pn(){let t=R(),n=document.getElementById("export-progress"),o=document.getElementById("export-progress-fill"),e=document.getElementById("export-progress-label"),i=document.getElementById("export-badge"),r=document.getElementById("btn-export");n.classList.remove("hidden"),i.classList.remove("hidden"),r.disabled=!0,e.textContent=`\u0417\u0430\u043F\u0438\u0441\u044C \u0432 \u0440\u0435\u0430\u043B\u044C\u043D\u043E\u043C \u0432\u0440\u0435\u043C\u0435\u043D\u0438: ${M(t)}\u2026`;try{let a=await co({onProgress:c=>{o.style.width=`${Math.round(c*100)}%`,e.textContent=`\u0417\u0430\u043F\u0438\u0441\u044C\u2026 ${Math.round(c*100)}%`}});if(a){let c=`montag-${new Date().toISOString().slice(0,19).replace(/[:T]/g,"-")}.webm`;uo(a,c);let s=(a.size/1048576).toFixed(1);v(`\u0413\u043E\u0442\u043E\u0432\u043E: ${c} (${s} \u041C\u0411) \u2014 <a href="${URL.createObjectURL(a)}" download="${c}">\u0441\u043A\u0430\u0447\u0430\u0442\u044C \u0441\u043D\u043E\u0432\u0430</a>`,{html:!0,timeout:15e3})}}catch(a){console.error(a),v(`\u041E\u0448\u0438\u0431\u043A\u0430 \u044D\u043A\u0441\u043F\u043E\u0440\u0442\u0430: ${a.message||a}`,{type:"error",timeout:8e3})}finally{i.classList.add("hidden"),r.disabled=!1,o.style.width="0%",setTimeout(()=>n.classList.add("hidden"),1200),Lt()}}U();H();function mn(){let t={app:"montag",version:1,settings:{...l.settings},media:l.media.map(e=>({name:e.name,duration:e.duration,width:e.width,height:e.height})),clips:l.clips.map(e=>({mediaName:fo(e.mediaId)?.name??"",in:e.in,out:e.out,transitionIn:e.transitionIn,volume:e.volume??1,name:e.name}))},n=new Blob([JSON.stringify(t,null,2)],{type:"application/json"}),o=document.createElement("a");o.href=URL.createObjectURL(n),o.download=`montag-project-${Date.now()}.json`,document.body.appendChild(o),o.click(),o.remove(),setTimeout(()=>URL.revokeObjectURL(o.href),3e4),v("\u041F\u0440\u043E\u0435\u043A\u0442 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D (JSON). \u0412\u0438\u0434\u0435\u043E \u043D\u0443\u0436\u043D\u043E \u0438\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u043E\u0432\u0442\u043E\u0440\u043D\u043E.")}async function hn(t){let n;try{n=JSON.parse(await t.text())}catch{v("\u041D\u0435 \u043F\u043E\u0445\u043E\u0436\u0435 \u043D\u0430 \u043F\u0440\u043E\u0435\u043A\u0442 MONTAG (\u0431\u0438\u0442\u044B\u0439 JSON)",{type:"error"});return}if(n?.app!=="montag"){v("\u0424\u0430\u0439\u043B \u043D\u0435 \u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u043F\u0440\u043E\u0435\u043A\u0442\u043E\u043C MONTAG",{type:"error"});return}let o=new Map(l.media.map(r=>[r.name,r])),e=new Set,i=[];for(let r of n.clips||[]){let a=o.get(r.mediaName);if(!a){e.add(r.mediaName);continue}let c=a.duration>0?a.duration:Math.max(r.out,1);i.push({id:Q("c"),mediaId:a.id,name:r.name||a.name.replace(/\.[^.]+$/,""),in:T(Number(r.in)||0,0,c),out:T(Number(r.out)||c,.1,c),transitionIn:["none","crossfade","fadeblack"].includes(r.transitionIn)?r.transitionIn:"none",volume:Number(r.volume??1)})}l.clips=i,rt(i[0]?.id??null),h.emit(y.CLIPS),e.size?v(`\u0418\u043C\u043F\u043E\u0440\u0442\u0438\u0440\u0443\u0439\u0442\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0430\u044E\u0449\u0438\u0435 \u0444\u0430\u0439\u043B\u044B: ${[...e].slice(0,3).join(", ")}${e.size>3?"\u2026":""}`,{type:"error",timeout:9e3}):v(`\u041F\u0440\u043E\u0435\u043A\u0442 \u0437\u0430\u0433\u0440\u0443\u0436\u0435\u043D: ${i.length} \u043A\u043B\u0438\u043F(\u043E\u0432)`)}function fo(t){return l.media.find(n=>n.id===t)||null}H();var I=t=>document.getElementById(t),yn=!1;function xn(){if(yn)return;yn=!0,Ae(I("canvas")),ce(),rn(),fn(),Ce(qe),h.on(y.MEDIA,he),h.on(y.PLAY,po),he();let t=I("file-input");I("btn-import").addEventListener("click",()=>t.click()),t.addEventListener("change",()=>{St(t.files),t.value=""}),I("btn-append-all").addEventListener("click",()=>me()),I("btn-demo").addEventListener("click",async()=>{let e=I("btn-demo");e.disabled=!0;let i=e.textContent;try{v("\u0413\u0435\u043D\u0435\u0440\u0438\u0440\u0443\u044E \u0434\u0435\u043C\u043E-\u043A\u043B\u0438\u043F (~9 \u0441)\u2026",{timeout:9e3}),await an(St,me,()=>{e.textContent="\u23F3 \u2026"})}catch(r){console.error(r);let a=on(),c=Object.entries(a).filter(([,s])=>!s).map(([s])=>s);v(`\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C \u0434\u0435\u043C\u043E-\u043A\u043B\u0438\u043F: ${r.message||r}`+(c.length?`. \u041D\u0435 \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044F: ${c.join(", ")}`:"")+". \u041D\u0443\u0436\u0435\u043D Chrome, Edge \u0438\u043B\u0438 Firefox.",{type:"error",timeout:14e3})}finally{e.disabled=!1,e.textContent=i}});let n=I("dropzone");["dragenter","dragover"].forEach(e=>n.addEventListener(e,i=>{i.preventDefault(),n.classList.add("dragover")})),["dragleave","drop"].forEach(e=>n.addEventListener(e,i=>{i.preventDefault(),n.classList.remove("dragover")})),n.addEventListener("drop",e=>St(e.dataTransfer.files)),window.addEventListener("dragover",e=>e.preventDefault()),window.addEventListener("drop",e=>{e.preventDefault(),!e.target.closest("#dropzone")&&e.dataTransfer?.files?.length&&St(e.dataTransfer.files)}),I("btn-play").addEventListener("click",()=>ee()),I("scrub").addEventListener("input",e=>{let i=R();S(Number(e.target.value)/1e3*i)}),I("btn-split").addEventListener("click",gn),I("btn-fullscreen").addEventListener("click",()=>{let e=I("stage");document.fullscreenElement?document.exitFullscreen():e.requestFullscreen?.().catch(()=>v("\u041F\u043E\u043B\u043D\u044B\u0439 \u044D\u043A\u0440\u0430\u043D \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D",{type:"error"}))}),I("btn-save").addEventListener("click",mn);let o=I("project-input");I("btn-load").addEventListener("click",()=>o.click()),o.addEventListener("change",()=>{o.files[0]&&hn(o.files[0]),o.value=""}),I("btn-foley").addEventListener("click",()=>{I("foley-drawer").classList.toggle("hidden")}),I("btn-export").addEventListener("click",()=>pn()),I("btn-clear").addEventListener("click",()=>{l.clips.length&&confirm("\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0432\u0441\u0435 \u043A\u043B\u0438\u043F\u044B \u0441 \u0442\u0430\u0439\u043C\u043B\u0430\u0439\u043D\u0430?")&&(l.clips=[],h.emit(y.CLIPS))}),I("resolution").addEventListener("change",e=>{let[i,r]=e.target.value.split("x").map(Number);l.settings.width=i,l.settings.height=r,te(),v(`\u0420\u0430\u0437\u043C\u0435\u0440 \u043F\u0440\u043E\u0435\u043A\u0442\u0430: ${i}\xD7${r}`)}),window.addEventListener("keydown",e=>{let i=(e.target.tagName||"").toLowerCase();i==="input"||i==="select"||i==="textarea"||(e.code==="Space"?(e.preventDefault(),ee()):e.key==="Delete"||e.key==="Backspace"?de()&&e.preventDefault():e.key.toLowerCase()==="s"?gn():e.key==="ArrowLeft"?(e.preventDefault(),S(l.time-(e.shiftKey?5:1))):e.key==="ArrowRight"?(e.preventDefault(),S(l.time+(e.shiftKey?5:1))):e.key==="Home"?S(0):e.key==="End"&&S(R()))}),window.addEventListener("beforeunload",e=>{(l.clips.length||l.foley.length)&&(e.preventDefault(),e.returnValue="")})}function gn(){let t=Be();t.ok||v(t.reason,{type:"error"})}function po(t){let n=I("btn-play");n.textContent=t?"\u275A\u275A":"\u25B6",n.title=t?"\u041F\u0430\u0443\u0437\u0430 (\u041F\u0440\u043E\u0431\u0435\u043B)":"\u041F\u0443\u0441\u043A (\u041F\u0440\u043E\u0431\u0435\u043B)"}document.addEventListener("DOMContentLoaded",xn,{once:!0});document.readyState!=="loading"&&xn();})();
+
+</script>
+</body>
+</html>

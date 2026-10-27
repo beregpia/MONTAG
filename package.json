@@ -4,6 +4,12 @@
   "description": "MONTAG — видеомонтажёр в браузере: импорт клипов, таймлайн, тримминг, переходы, экспорт в webm.",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node tests/run-all.mjs",
+    "build": "node build-standalone.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "jsdom": "^30.1.3"
   }
 }

@@ -80,6 +80,9 @@ export async function makeDemoFile(onStage) {
 
   const stream = canvas.captureStream(0); // 0 = кадры только по запросу
   const videoTrack = stream.getVideoTracks()[0];
+  if (!videoTrack || typeof videoTrack.requestFrame !== 'function') {
+    throw new Error('браузер не отдал видео-дорожку canvas (captureStream) — запись невозможна');
+  }
 
   // --- звук: низкие удары (шаги) + щелчки ---
   const AC = window.AudioContext || window.webkitAudioContext;
