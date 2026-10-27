@@ -1,9 +1,11 @@
 /* ============ Таймлайн: клипы, перетаскивание, плейхед, зум ============ */
 
-import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, getMedia } from './state.js';
+import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip } from './state.js';
 import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
+import { sfxById } from './sfx.js';
+import { auditionEvent } from './foley.js';
 
 let pps = 70; // пикселей на секунду
 const MIN_PPS = 16;
@@ -29,6 +31,7 @@ export function initTimeline() {
   bus.on(EV.MEDIA, render);
   bus.on(EV.SELECT, render);
   bus.on(EV.TIME, updatePlayhead);
+  bus.on(EV.FOLEY, render);
   window.addEventListener('resize', () => render());
 
   document.getElementById('zoom-in').addEventListener('click', () => zoom(1.25));
@@ -101,6 +104,7 @@ export function render() {
 
   renderRuler(total, width);
   renderTrack(layout);
+  renderFoleyTrack(total, width);
   updatePlayhead(state.time);
 
   document.getElementById('timeline-info').textContent =
@@ -217,6 +221,37 @@ function moveClipTo(clipId, targetIndex) {
   const adjusted = targetIndex > from ? targetIndex - 1 : targetIndex;
   state.clips.splice(clamp(adjusted, 0, state.clips.length), 0, clip);
   bus.emit(EV.CLIPS);
+}
+
+/** Дорожка фоли: маркеры событий под клипами. */
+function renderFoleyTrack(total, width) {
+  const strip = document.getElementById('foley-track');
+  if (!strip) return;
+  strip.style.width = `${width}px`;
+  strip.textContent = '';
+
+  if (!state.foley.length) {
+    strip.append(el('div', { class: 'foley-track-empty' }, 'фоли-слой пуст — откройте панель 🎙 Foley'));
+    return;
+  }
+
+  for (const ev of state.foley) {
+    const t = ev.time + (ev.offset ?? 0);
+    if (t * pps > width) continue;
+    const meta = sfxById(ev.sfx);
+    const mark = el('div', {
+      class: `foley-mark${ev.id === state.selectedFoleyId ? ' selected' : ''}${ev.detected ? ' detected' : ''}`,
+      style: `left:${t * pps}px`,
+      title: `${meta.label} · ${fmtTime(t)} · сдвиг ${Math.round((ev.offset ?? 0) * 1000)} мс`,
+    }, meta.icon);
+    mark.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectFoley(ev.id);
+      player.seek(t);
+      auditionEvent(ev);
+    });
+    strip.append(mark);
+  }
 }
 
 function updatePlayhead(t) {

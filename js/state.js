@@ -3,6 +3,10 @@
 export const state = {
   media: [],          // { id, name, url, file, duration, width, height, thumb }
   clips: [],          // { id, mediaId, in, out, transitionIn, volume, name, _video, _gain }
+  foley: [],          // { id, time, sfx, gain, offset, band, strength, detected }
+  foleyDetected: {},  // mediaId -> [{ time, band, strength }] — найденные моменты контакта
+  foleyGain: 0.9,
+  selectedFoleyId: null,
   selectedClipId: null,
   settings: { width: 1280, height: 720, fps: 30, crossfade: 0.5 },
   time: 0,
@@ -37,6 +41,7 @@ export const EV = {
   SELECT: 'selection-changed',
   TIME: 'time-changed',
   PLAY: 'play-changed',
+  FOLEY: 'foley-changed',
 };
 
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -101,4 +106,35 @@ export function removeClip(id) {
 export function selectClip(id) {
   state.selectedClipId = id;
   bus.emit(EV.SELECT, id);
+}
+
+/* ---------- фоли-слой ---------- */
+export function selectFoley(id) {
+  state.selectedFoleyId = id;
+  bus.emit(EV.FOLEY, id);
+}
+
+export function addFoleyEvent(ev) {
+  state.foley.push(ev);
+  bus.emit(EV.FOLEY);
+}
+
+export function updateFoleyEvent(id, patch) {
+  const ev = state.foley.find((e) => e.id === id);
+  if (!ev) return;
+  Object.assign(ev, patch);
+  bus.emit(EV.FOLEY);
+}
+
+export function removeFoleyEvent(id) {
+  const i = state.foley.findIndex((e) => e.id === id);
+  if (i !== -1) state.foley.splice(i, 1);
+  if (state.selectedFoleyId === id) state.selectedFoleyId = null;
+  bus.emit(EV.FOLEY);
+}
+
+export function clearFoley() {
+  state.foley = [];
+  state.selectedFoleyId = null;
+  bus.emit(EV.FOLEY);
 }

@@ -11,6 +11,13 @@ let ctx = null;
 let rafId = null;
 let clockBase = 0;     // state.time на момент старта воспроизведения
 let clockStart = 0;    // performance.now() на момент старта
+let lastFrameT = 0;    // позиция предыдущего кадра (для фоли-триггеров)
+let frameHook = null;  // (prevT, t) => void — устанавливает модуль фоли
+
+/** Регистрирует покадровый хук (используется движком фоли). */
+export function setFrameHook(fn) {
+  frameHook = fn;
+}
 
 /* ---------- аудиограф ---------- */
 let audioCtx = null;
@@ -32,6 +39,15 @@ export function ensureAudio() {
 export function getStreamDestination() {
   ensureAudio();
   return streamDest;
+}
+
+export function getMasterGain() {
+  ensureAudio();
+  return masterGain;
+}
+
+export function audioContext() {
+  return ensureAudio();
 }
 
 export function resumeAudio() {
@@ -168,6 +184,7 @@ export function play() {
   state.playing = true;
   clockBase = state.time;
   clockStart = performance.now();
+  lastFrameT = state.time;
   // разбудим клипы, которые должны играть прямо сейчас
   for (const it of computeLayout()) {
     if (state.time >= it.start && state.time < it.end) {
@@ -194,6 +211,11 @@ function loop(now) {
   state.time = t;
   renderFrame(t);
   syncPlayback(t);
+  if (frameHook) {
+    const prev = lastFrameT;
+    lastFrameT = t;
+    frameHook(prev, t);
+  }
   bus.emit(EV.TIME, t);
   rafId = requestAnimationFrame(loop);
 }
@@ -231,6 +253,7 @@ export function toggle() {
 export function seek(t) {
   const total = totalDuration();
   state.time = clamp(t, 0, total);
+  lastFrameT = state.time;
   if (state.playing) {
     clockBase = state.time;
     clockStart = performance.now();

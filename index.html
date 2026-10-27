@@ -24,6 +24,7 @@
     </select>
     <button id="btn-save" class="btn ghost" title="Сохранить проект в JSON">Проект ↓</button>
     <button id="btn-load" class="btn ghost" title="Открыть проект из JSON">Проект ↑</button>
+    <button id="btn-foley" class="btn ghost" title="Foley — синхронизация звука с видео">🎙 Foley</button>
     <button id="btn-export" class="btn primary" title="Собрать видео и скачать webm">⏺ Экспорт видео</button>
   </div>
 </header>
@@ -87,9 +88,18 @@
   <div id="timeline" class="timeline">
     <div id="ruler" class="ruler"></div>
     <div id="track" class="track"></div>
+    <div id="foley-track" class="foley-track"></div>
     <div id="playhead" class="playhead"></div>
   </div>
 </footer>
+
+<aside id="foley-drawer" class="foley-drawer hidden">
+  <div class="foley-head">
+    <h2>🎙 Foley — синхронизация звука</h2>
+    <button id="foley-close" class="btn ghost tiny" title="Закрыть">✕</button>
+  </div>
+  <div id="foley-body" class="foley-body"></div>
+</aside>
 
 <input type="file" id="file-input" accept="video/*" multiple hidden>
 <input type="file" id="project-input" accept=".json,application/json" hidden>

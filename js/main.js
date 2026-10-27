@@ -4,6 +4,8 @@ import { state, EV, bus, totalDuration, clamp } from './state.js';
 import { importFiles, renderMediaList } from './media.js';
 import { initTimeline, deleteSelected } from './timeline.js';
 import { initInspector } from './inspector.js';
+import { initFoleyPanel } from './foley-panel.js';
+import * as foley from './foley.js';
 import * as player from './player.js';
 import { runExport } from './recorder.js';
 import { saveProject, openProjectFile } from './project.js';
@@ -19,6 +21,10 @@ function init() {
   player.initPlayer($('canvas'));
   initTimeline();
   initInspector();
+  initFoleyPanel();
+
+  // фоли-триггеры: покадровый хук плеера
+  player.setFrameHook(foley.tick);
 
   bus.on(EV.MEDIA, renderMediaList);
   bus.on(EV.PLAY, updatePlayButton);
@@ -70,6 +76,9 @@ function init() {
     if (projectInput.files[0]) openProjectFile(projectInput.files[0]);
     projectInput.value = '';
   });
+  $('btn-foley').addEventListener('click', () => {
+    $('foley-drawer').classList.toggle('hidden');
+  });
   $('btn-export').addEventListener('click', () => runExport());
   $('btn-clear').addEventListener('click', () => {
     if (!state.clips.length) return;
@@ -103,7 +112,7 @@ function init() {
 
   // предупреждаем о несохранённом проекте
   window.addEventListener('beforeunload', (e) => {
-    if (state.clips.length) { e.preventDefault(); e.returnValue = ''; }
+    if (state.clips.length || state.foley.length) { e.preventDefault(); e.returnValue = ''; }
   });
 }
 

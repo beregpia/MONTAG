@@ -308,6 +308,90 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .toast a { color: var(--accent-2); }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
 
+/* ---------- дорожка фоли ---------- */
+.foley-track {
+  position: relative;
+  height: 34px;
+  border-top: 1px solid var(--line);
+  background: #0d0f13;
+}
+.foley-track-empty {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  font-size: 11px; color: #565d6b;
+}
+.foley-mark {
+  position: absolute;
+  top: 5px;
+  transform: translateX(-50%);
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid; place-items: center;
+  background: var(--bg-elev);
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .12s, transform .12s;
+}
+.foley-mark:hover { border-color: var(--accent); transform: translateX(-50%) scale(1.12); }
+.foley-mark.selected { border-color: var(--accent); background: var(--accent-soft); }
+.foley-mark.detected { border-style: dashed; }
+
+/* ---------- drawer Foley ---------- */
+.foley-drawer {
+  position: fixed;
+  top: 49px;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 92vw;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 40px rgba(0, 0, 0, .5);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in .18s ease-out;
+}
+@keyframes drawer-in { from { transform: translateX(30px); opacity: 0; } }
+.foley-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.foley-body { overflow-y: auto; padding: 4px 12px 20px; }
+.foley-section { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.foley-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--accent-2); font-weight: 700; }
+.foley-stat { line-height: 1.5; }
+
+.foley-events { display: flex; flex-direction: column; gap: 5px; max-height: 320px; overflow-y: auto; }
+.foley-event {
+  display: grid;
+  grid-template-columns: 62px 1fr auto;
+  grid-template-areas: "time sfx nudge" "gain gain gain" "play play del";
+  align-items: center;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.foley-event:hover { border-color: #3a4150; }
+.foley-event.selected { border-color: var(--accent); background: var(--accent-soft); }
+.foley-event-time { grid-area: time; font-variant-numeric: tabular-nums; font-size: 12px; display: flex; flex-direction: column; }
+.foley-event .tiny-select { grid-area: sfx; font-size: 11px; padding: 3px 4px; }
+.foley-nudge { grid-area: nudge; display: flex; align-items: center; gap: 3px; }
+.foley-gain { grid-area: gain; width: 100%; accent-color: var(--accent); height: 14px; }
+.foley-event > .btn { grid-area: play; }
+.foley-event > .danger { grid-area: del; justify-self: end; }
+
+.foley-lib { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.foley-lib-btn { display: flex; align-items: center; gap: 6px; text-align: left; padding: 6px 8px; }
+.foley-lib-icon { font-size: 15px; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #2a2e38; border-radius: 5px; border: 2px solid var(--bg-panel); }
 ::-webkit-scrollbar-track { background: transparent; }
