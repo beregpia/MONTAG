@@ -1,0 +1,9 @@
+{
+  "name": "montag",
+  "version": "1.0.0",
+  "description": "MONTAG — видеомонтажёр в браузере: импорт клипов, таймлайн, тримминг, переходы, экспорт в webm.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
