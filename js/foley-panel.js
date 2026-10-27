@@ -3,12 +3,15 @@
 import { state, EV, bus, getMedia, updateFoleyEvent, removeFoleyEvent, clearFoley, selectFoley, totalDuration } from './state.js';
 import { fmtTime, el, toast } from './ui.js';
 import { analyzeMedia, applyDetected, auditionEvent, auditionSfx, setFoleyGain, nudgeEvent, frameSeconds } from './foley.js';
-import { SFX_LIST, sfxById } from './sfx.js';
+import { SFX_LIST, sfxById, autoSfxFor } from './sfx.js';
+import { buildMarkerMidi } from './midi.js';
 import * as player from './player.js';
 
 let suppressRender = false;
 let sensitivity = 1;
 let minGap = 0.12;
+let exportSource = 'detected'; // 'detected' | 'placed'
+let exportOffset = 0;          // секунды, для видео не с нуля в проекте
 let stage = ''; // '' | 'decode' | 'analyze' | 'done' | 'error'
 let lastMediaId = null;
 const MAX_ROWS = 150;
@@ -146,6 +149,66 @@ function render() {
 
   /* ---------- 5. Микшер ---------- */
   const gainLabel = el('b', {}, `${Math.round(state.foleyGain * 100)}%`);
+  /* ---------- экспорт маркеров в DAW ---------- */
+  // состояние секции живёт вне render(), иначе перерисовка панели сбрасывала бы выбор
+  const offsetInput = el('input', {
+    type: 'number', class: 'select', value: String(exportOffset), step: '0.001', style: 'width:100%',
+    title: 'Смещение маркеров в секундах — если видео в проекте стоит не с нуля',
+  });
+  const offsetLabel = el('b', {}, String(exportOffset));
+  offsetInput.addEventListener('input', () => {
+    exportOffset = parseFloat(offsetInput.value) || 0;
+    offsetLabel.textContent = offsetInput.value;
+  });
+  const sourceSelect = el('select', { class: 'select', style: 'width:100%' });
+  for (const [value, label] of [['detected', 'Найденные события источника'], ['placed', 'Размещённые фоли-события']]) {
+    const opt = el('option', { value }, label);
+    if (exportSource === value) opt.selected = true;
+    sourceSelect.append(opt);
+  }
+  sourceSelect.addEventListener('change', () => { exportSource = sourceSelect.value; });
+  const exportBtn = el('button', { class: 'btn primary', style: 'width:100%' }, '⇩ Экспорт маркеров в MIDI (.mid)');
+  exportBtn.addEventListener('click', () => {
+    const offset = exportOffset;
+    const markers = exportSource === 'placed'
+      ? state.foley.map((ev, i) => ({
+          time: ev.time + (ev.offset ?? 0) + offset,
+          name: `${String(i + 1).padStart(2, '0')} ${ev.sfx}`,
+        }))
+      : (detected || []).map((d, i) => ({
+          time: d.time + offset,
+          // ASCII-имена: SMF-текст маркера должен быть ASCII, иначе DAW покажет «???»
+          name: `${String(i + 1).padStart(2, '0')} ${d.time.toFixed(2)}s ${d.band} ${autoSfxFor(d.band, d.strength, i)}`,
+        }));
+    if (!markers.length) {
+      toast('Нет событий для экспорта — сначала проанализируйте аудио или разместите фоли', { type: 'error' });
+      return;
+    }
+    const data = buildMarkerMidi(markers);
+    const blob = new Blob([data], { type: 'audio/midi' });
+    const a = document.createElement('a');
+    const name = `montag-markers-${(getMedia(currentMediaId)?.name || 'project').replace(/\.[^.]+$/, '')}.mid`;
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+    toast(`${markers.length} маркеров → ${name}. В Cubase: File → Import → MIDI File (включите Import Markers в настройках)`);
+  });
+  body.append(
+    section('Экспорт маркеров в DAW',
+      sourceSelect,
+      offsetInput,
+      el('div', { class: 'insp-label' }, 'Смещение, с', offsetLabel),
+      offsetInput,
+      exportBtn,
+      el('div', { class: 'muted small' },
+        'Маркеры пишутся в Standard MIDI File с точностью 1 мс — Cubase, Nuendo, ' +
+        'Reaper, Ableton и Logic импортируют их как маркеры проекта для привязки клипов.'),
+    ),
+  );
+
   body.append(
     section('5 · Микшер',
       el('div', { class: 'insp-label' }, 'Общая громкость фоли', gainLabel),
