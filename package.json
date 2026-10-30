@@ -16,10 +16,13 @@
     "place-demo": "node tools/run-place-demo.mjs",
     "place": "node tools/place-foley.mjs",
     "tc": "node tools/tc.mjs",
-    "index-library": "node tools/index-library.mjs"
+    "index-library": "node tools/index-library.mjs",
+    "build:win": "node electron/build-win.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
-    "jsdom": "^30.1.3"
+    "jsdom": "^30.1.3",
+    "electron": "^33.4.2",
+    "electron-packager": "^17.1.2"
   }
 }
