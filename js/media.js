@@ -2,6 +2,7 @@
 
 import { state, uid, EV, bus } from './state.js';
 import { toast } from './ui.js';
+import * as player from './player.js';
 
 export let selectedMediaId = null;
 
@@ -66,6 +67,7 @@ export function appendAllToTimeline() {
     toast('Медиатека пуста — сначала импортируйте видео', { type: 'error' });
     return 0;
   }
+  const wasEmpty = state.clips.length === 0;
   let added = 0;
   for (const media of state.media) {
     state.clips.push({
@@ -80,6 +82,8 @@ export function appendAllToTimeline() {
     added++;
   }
   bus.emit(EV.CLIPS);
+  // первый клип задаёт пропорции холста, чтобы кадр не обрезался
+  if (wasEmpty && added) player.adoptResolution(state.media[0]);
   if (added) toast(`На таймлайн добавлено клипов: ${added}`);
   return added;
 }

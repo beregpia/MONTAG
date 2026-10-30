@@ -21,9 +21,12 @@ let dragClipId = null;
 export function appendMedia(mediaId) {
   const clip = makeClipFromMedia(mediaId);
   if (!clip) return;
+  const wasEmpty = state.clips.length === 0;
   state.clips.push(clip);
   selectClip(clip.id);
   bus.emit(EV.CLIPS);
+  // первый клип задаёт пропорции холста, чтобы кадр не обрезался
+  if (wasEmpty) player.adoptResolution(getMedia(mediaId));
 }
 
 export function initTimeline() {

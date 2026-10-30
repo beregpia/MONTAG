@@ -179,6 +179,39 @@ export function applyResolution() {
   renderFrame(state.time);
 }
 
+/** Дописывает разрешение клипа в список и выбирает его. */
+function syncResolutionSelect(w, h) {
+  const sel = document.getElementById('resolution');
+  if (!sel) return;
+  const val = `${w}x${h}`;
+  if (![...sel.options].some((o) => o.value === val)) {
+    const o = document.createElement('option');
+    o.value = val;
+    o.textContent = `${w} × ${h} (как в клипе)`;
+    sel.append(o);
+  }
+  sel.value = val;
+}
+
+/** Подстраивает холст под разрешение клипа, иначе кадр обрезается.
+ *  Холст был жёстко 1280×720, а клип 1920×882 — cover-fit отрезал ~22% по
+ *  бокам, и монтажёр видел «не тот масштаб». Зовём при добавлении первого
+ *  клипа: свой выбор разрешения пользователь делает позже и его не перебьём. */
+export function adoptResolution(media) {
+  if (!canvas) return;
+  const w0 = Math.round(media?.width || 0);
+  const h0 = Math.round(media?.height || 0);
+  if (!w0 || !h0 || !isFinite(w0) || !isFinite(h0)) return;
+  const k = Math.min(1, 1920 / w0); // 4K и больше уменьшаем, пропорции сохраняем
+  const w = Math.max(2, Math.round((w0 * k) / 2) * 2);
+  const h = Math.max(2, Math.round((h0 * k) / 2) * 2);
+  if (w === state.settings.width && h === state.settings.height) return;
+  state.settings.width = w;
+  state.settings.height = h;
+  applyResolution();
+  syncResolutionSelect(w, h);
+}
+
 /* ---------- рендер кадра ---------- */
 
 /** Резерв: показываем кадр самим <video> клипа, когда холст не рисует.

@@ -111,3 +111,34 @@ test('холст оживает: повторная попытка снимае�
   player.renderFrame(1);
   assert.equal(stageVideos().length, 0, 'после оживания холста слой не должен возвращаться');
 });
+
+test('холст подстраивается под пропорции клипа: 1920×882 не режется', () => {
+  window.HTMLCanvasElement.prototype.getContext = () => null;
+  player.initPlayer(document.getElementById('canvas'));
+  state.state.settings.width = 1280;
+  state.state.settings.height = 720;
+  player.adoptResolution({ width: 1920, height: 882 });
+  assert.equal(state.state.settings.width, 1920, 'ширина не приняла пропорции клипа');
+  assert.equal(state.state.settings.height, 882, 'высота не приняла пропорции клипа');
+  assert.equal(document.getElementById('canvas').width, 1920);
+  assert.equal(document.getElementById('canvas').height, 882);
+  const sel = document.getElementById('resolution');
+  assert.equal(sel.value, '1920x882', 'в списке разрешений не выбрано «как в клипе»');
+  assert.ok([...sel.options].some((o) => o.value === '1920x882'), 'варианта «как в клипе» нет в списке');
+});
+
+test('4K уменьшается вдвое, но пропорции сохраняются', () => {
+  player.adoptResolution({ width: 3840, height: 2160 });
+  assert.equal(state.state.settings.width, 1920);
+  assert.equal(state.state.settings.height, 1080);
+});
+
+test('без размеров клипа разрешение не трогаем', () => {
+  const w = state.state.settings.width;
+  const h = state.state.settings.height;
+  player.adoptResolution({});
+  player.adoptResolution({ width: 0, height: 0 });
+  player.adoptResolution(null);
+  assert.equal(state.state.settings.width, w);
+  assert.equal(state.state.settings.height, h);
+});
