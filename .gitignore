@@ -1,0 +1,6 @@
+node_modules/
+.bundle.tmp.js
+*.log
+
+# сгенерированные фикстуры эксперимента (создаются npm run fixtures)
+tools/fixtures/

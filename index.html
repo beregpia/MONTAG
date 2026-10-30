@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MONTAG — видеомонтаж в браузере</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">M</span>
+    <span class="brand-name">MONTAG</span>
+    <span class="brand-tag">видеомонтаж в браузере</span>
+  </div>
+  <div class="topbar-actions">
+    <button id="btn-import" class="btn">＋ Импорт видео</button>
+    <select id="resolution" class="select" title="Размер проекта">
+      <option value="1920x1080">1920 × 1080</option>
+      <option value="1280x720" selected>1280 × 720</option>
+      <option value="1080x1080">1080 × 1080</option>
+      <option value="720x1280">720 × 1280 (вертикально)</option>
+    </select>
+    <button id="btn-save" class="btn ghost" title="Сохранить проект в JSON">Проект ↓</button>
+    <button id="btn-load" class="btn ghost" title="Открыть проект из JSON">Проект ↑</button>
+    <button id="btn-foley" class="btn ghost" title="Foley — синхронизация звука с видео">🎙 Foley</button>
+    <button id="btn-export" class="btn primary" title="Собрать видео и скачать webm">⏺ Экспорт видео</button>
+  </div>
+</header>
+
+<main class="layout">
+
+  <aside class="panel">
+    <div class="panel-head">
+      <h2>Медиа</h2>
+      <span class="muted" id="media-count">0</span>
+    </div>
+    <div id="dropzone" class="dropzone">
+      <div class="dropzone-icon">🎬</div>
+      <div>Перетащите видео сюда</div>
+      <div class="muted small">mp4 (H.264) · webm (VP8/VP9) — не откроет mkv, ProRes, HEVC</div>
+    </div>
+    <div class="media-actions">
+      <button id="btn-demo" class="btn" style="flex:1" title="Создать тестовый клип с шагами — проверить приложение без своих файлов">🎬 Демо-клип</button>
+      <button id="btn-append-all" class="btn" style="flex:1" title="Добавить все файлы медиатеки на таймлайн">На таймлайн</button>
+    </div>
+    <ul id="media-list" class="media-list"></ul>
+  </aside>
+
+  <section class="stage-wrap">
+    <div class="stage" id="stage">
+      <canvas id="canvas" width="1280" height="720"></canvas>
+      <div id="stage-empty" class="stage-empty">
+        <div class="stage-empty-icon">🎞</div>
+        <div>Таймлайн пуст</div>
+        <div class="muted small">Импортируйте видео и добавьте клипы двойным кликом</div>
+      </div>
+      <div id="export-badge" class="export-badge hidden">● ЗАПИСЬ</div>
+    </div>
+
+    <div class="transport">
+      <button id="btn-play" class="btn play" title="Пуск / пауза (Пробел)">▶</button>
+      <span id="time-display" class="time-display">00:00.0 / 00:00.0</span>
+      <input id="scrub" class="scrub" type="range" min="0" max="1000" value="0" step="1" title="Позиция воспроизведения">
+      <button id="btn-split" class="btn ghost" title="Разделить клип на позиции-playhead (S)">✂ Разделить</button>
+      <button id="btn-fullscreen" class="btn ghost" title="Полный экран">⛶</button>
+    </div>
+
+    <div id="export-progress" class="export-progress hidden">
+      <div class="export-progress-bar"><div id="export-progress-fill" class="fill"></div></div>
+      <span id="export-progress-label" class="small muted">Запись…</span>
+    </div>
+  </section>
+
+  <aside class="panel">
+    <div class="panel-head"><h2>Клип</h2></div>
+    <div id="inspector-body" class="inspector-body"></div>
+  </aside>
+
+</main>
+
+<footer class="timeline-wrap">
+  <div class="timeline-toolbar">
+    <h2>Таймлайн</h2>
+    <span id="timeline-info" class="muted small">0 клипов · 00:00.0</span>
+    <div class="spacer"></div>
+    <button id="zoom-out" class="btn ghost tiny" title="Уменьшить">−</button>
+    <button id="zoom-in" class="btn ghost tiny" title="Увеличить">＋</button>
+    <button id="btn-clear" class="btn ghost tiny danger" title="Удалить все клипы">Очистить</button>
+  </div>
+  <div id="timeline" class="timeline">
+    <div id="ruler" class="ruler"></div>
+    <div id="track" class="track"></div>
+    <div id="foley-track" class="foley-track"></div>
+    <div id="playhead" class="playhead"></div>
+  </div>
+</footer>
+
+<aside id="foley-drawer" class="foley-drawer hidden">
+  <div class="foley-head">
+    <h2>🎙 Foley — синхронизация звука</h2>
+    <button id="foley-close" class="btn ghost tiny" title="Закрыть">✕</button>
+  </div>
+  <div id="foley-body" class="foley-body"></div>
+</aside>
+
+<input type="file" id="file-input" accept="video/*" multiple hidden>
+<input type="file" id="project-input" accept=".json,application/json" hidden>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
