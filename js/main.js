@@ -6,6 +6,7 @@ import { loadDemoClip, demoCapabilities } from './demo.js';
 import { initTimeline, deleteSelected } from './timeline.js';
 import { initInspector } from './inspector.js';
 import { initFoleyPanel } from './foley-panel.js';
+import { initEnginePanel } from './engine-panel.js';
 import * as foley from './foley.js';
 import * as player from './player.js';
 import { runExport } from './recorder.js';
@@ -23,6 +24,7 @@ function init() {
   initTimeline();
   initInspector();
   initFoleyPanel();
+  initEnginePanel();
 
   // фоли-триггеры: покадровый хук плеера
   player.setFrameHook(foley.tick);
@@ -101,6 +103,10 @@ function init() {
     if (projectInput.files[0]) openProjectFile(projectInput.files[0]);
     projectInput.value = '';
   });
+  $('btn-engine').addEventListener('click', () => {
+    document.getElementById('engine-drawer').classList.toggle('hidden');
+  });
+
   $('btn-foley').addEventListener('click', () => {
     $('foley-drawer').classList.toggle('hidden');
   });

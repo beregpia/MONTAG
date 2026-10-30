@@ -432,3 +432,18 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   .layout { grid-template-columns: 210px minmax(0, 1fr) 250px; }
   .brand-tag { display: none; }
 }
+
+/* ---------- панель «Движок» ---------- */
+.engine-body h3 { margin: 14px 0 6px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #9aa4b2); }
+.engine-body .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.engine-body .input { background: #10131a; border: 1px solid #262c38; color: #e6e9ef; border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; min-width: 120px; }
+.engine-body .input.tiny { width: 74px; min-width: 74px; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+.mini-table th { text-align: left; color: #9aa4b2; font-weight: 500; padding: 4px 6px; border-bottom: 1px solid #262c38; white-space: nowrap; }
+.mini-table td { padding: 4px 6px; border-bottom: 1px solid #1b2029; white-space: nowrap; }
+.mini-table tr:hover td { background: #151a23; }
+.mini-list { max-height: 220px; overflow: auto; border: 1px solid #262c38; border-radius: 8px; }
+.mini-row { display: flex; gap: 10px; align-items: center; padding: 4px 8px; font-size: 12px; border-bottom: 1px solid #1b2029; }
+.mini-row:last-child { border-bottom: none; }
+.mini-row .mono, .mini-table .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.warn { color: #ffb454; }
