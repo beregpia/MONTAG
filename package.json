@@ -8,7 +8,9 @@
     "test": "node tests/run-all.mjs",
     "build": "node build-standalone.mjs",
     "fixtures": "node tools/make-fixtures.mjs",
-    "compare": "node tools/foley-compare.mjs"
+    "compare": "node tools/foley-compare.mjs",
+    "library-fixture": "node tools/make-library-fixture.mjs",
+    "library": "node tools/foley-library.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
