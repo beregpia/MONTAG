@@ -29,6 +29,7 @@ const MIN_GAP = Number(arg('min-gap', 0.08));
 const SLICE = arg('slice', '');
 const HANDLES = Number(arg('handles', 0.05));
 const CATEGORY = arg('category', '');
+const OUT = arg('out', 'tools/fixtures/library-index.json');
 
 if (!existsSync(TRACK)) {
   console.error(`Нет файла ${TRACK}. Сгенерируйте демо-дубль: node tools/make-library-fixture.mjs`);
@@ -155,7 +156,7 @@ function classify(e) {
   if (zcr > 0.05) return 'prop-mid';
   return 'other';
 }
-for (const e of events) { e.category = classify(e); e.gain = Math.min(1, e.peak); }
+for (const e of events) { e.category = CATEGORY || classify(e); e.gain = Math.min(1, e.peak); }
 
 /* ---------- 4. чередование стоп и темп (для шагов) ---------- */
 const steps = events.filter((e) => e.category.startsWith('step'));
@@ -211,8 +212,9 @@ if (SLICE) {
 }
 
 /* ---------- 7. JSON для программы ---------- */
-writeFileSync('tools/fixtures/library-index.json', `${JSON.stringify({
+writeFileSync(OUT, `${JSON.stringify({
   track: TRACK,
+  category: CATEGORY || 'mixed',
   sampleRate: SR,
   duration: mono.length / SR,
   options: { sensitivity: SENS, minGap: MIN_GAP },
@@ -221,6 +223,7 @@ writeFileSync('tools/fixtures/library-index.json', `${JSON.stringify({
     time: Number(e.time.toFixed(4)),
     timecode: fmtTC(e.time),
     category: e.category,
+    track: CATEGORY || 'mixed',
     foot: e.foot || null,
     duration: Number(e.duration.toFixed(4)),
     peak: Number(e.peak.toFixed(4)),
@@ -231,7 +234,7 @@ writeFileSync('tools/fixtures/library-index.json', `${JSON.stringify({
     band: e.band,
   })),
 }, null, 2)}\n`);
-console.log('✓ Индекс записан: tools/fixtures/library-index.json');
+console.log(`✓ Индекс записан: ${OUT}`);
 
 function fmtTC(t) {
   const h = Math.floor(t / 3600);
