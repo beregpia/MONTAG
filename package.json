@@ -10,7 +10,9 @@
     "fixtures": "node tools/make-fixtures.mjs",
     "compare": "node tools/foley-compare.mjs",
     "library-fixture": "node tools/make-library-fixture.mjs",
-    "library": "node tools/foley-library.mjs"
+    "library": "node tools/foley-library.mjs",
+    "align-fixture": "node tools/make-align-fixture.mjs",
+    "align": "node tools/align-pass.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
