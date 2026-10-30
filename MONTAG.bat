@@ -1,38 +1,29 @@
 @echo off
 chcp 65001 >nul
-setlocal EnableDelayedExpansion
+setlocal
 title MONTAG - расстановка фоли
 
-rem ============ Запуск приложения без установки ============
-rem Открывает montag-standalone.html в окне без адресной строки и вкладок.
+rem ============ Запуск MONTAG: надёжный вариант ============
+rem Открывает montag-standalone.html браузером по умолчанию.
 rem Файл должен лежать рядом с этим .bat. Node и интернет не нужны.
+rem
+rem Хотите окно без адресной строки и вкладок — запустите MONTAG-окно.bat
 
 set "APP=%~dp0montag-standalone.html"
-if not exist "!APP!" (
-  echo.
-  echo   Рядом с этим файлом нет montag-standalone.html
-  echo   Положите оба файла в одну папку и запустите снова.
-  echo.
-  pause
-  exit /b 1
-)
+set "LOG=%~dp0MONTAG-запуск.log"
 
-set "APPURL=file:///!APP:\=/!"
+if not exist "%APP%" goto nofile
 
-where /q msedge.exe
-if !errorlevel! == 0 (
-  start "" msedge.exe --app="!APPURL!" --window-size=1560,960
-  goto :done
-)
+echo [%date% %time%] файл найден: "%APP%" > "%LOG%" 2>nul
+echo [%date% %time%] открываю браузером по умолчанию >> "%LOG%" 2>nul
+start "" "%APP%"
+echo [%date% %time%] команда запуска выполнена >> "%LOG%" 2>nul
+exit /b 0
 
-where /q chrome.exe
-if !errorlevel! == 0 (
-  start "" chrome.exe --app="!APPURL!" --window-size=1560,960
-  goto :done
-)
-
-rem Ни Edge, ни Chrome не нашлись — открываем браузером по умолчанию
-start "" "!APP!"
-
-:done
-endlocal
+:nofile
+echo.
+echo   Рядом с этим файлом нет montag-standalone.html
+echo   Положите оба файла в одну папку и запустите снова.
+echo.
+pause
+exit /b 1
