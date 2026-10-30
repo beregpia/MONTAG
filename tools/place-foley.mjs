@@ -24,6 +24,7 @@ const LIB = arg('library', 'tools/fixtures/lib');
 const VIDEO = arg('video', 'tools/fixtures/place-video.json');
 const OUT = arg('out', 'tools/fixtures/placements.json');
 const COOLDOWN = Number(arg('cooldown', 4));
+const USAGE_W = Number(arg('usage-weight', 0.12)); // штраф за каждый прошлыйuso использования дубля
 
 if (!existsSync(VIDEO)) { console.error(`Нет ${VIDEO}`); process.exit(1); }
 if (!existsSync(LIB)) { console.error(`Нет каталога ${LIB}`); process.exit(1); }
@@ -42,10 +43,15 @@ const profileOf = (c) => PROFILES[c] || PROFILES.default;
 
 /* ---------- загрузка библиотеки ---------- */
 const library = [];
-for (const f of readdirSync(LIB).filter((f) => f.endsWith('.json')).sort()) {
+for (const f of readdirSync(LIB).filter((f) => f.endsWith('.index.json')).sort()) {
   const idx = JSON.parse(readFileSync(join(LIB, f), 'utf8'));
-  const cat = idx.category || f.replace(/\.json$/, '');
-  for (const e of idx.events || []) library.push({ ...e, category: e.category || cat, track: idx.track || cat, file: `${LIB}/${cat}.wav` });
+  const cat = idx.category || f.replace(/\.index\.json$/, '');
+  for (const e of idx.events || []) {
+    // в библиотеку идут только настоящие дубли: с позицией, пиком и длительностью.
+    // так разметка картинки или посторонний JSON в папке не попадут в дубли.
+    if (typeof e.time !== 'number' || typeof e.peak !== 'number' || typeof e.duration !== 'number') continue;
+    library.push({ ...e, category: e.category || cat, track: idx.track || cat, file: `${LIB}/${cat}.wav` });
+  }
 }
 const video = JSON.parse(readFileSync(VIDEO, 'utf8'));
 const FPS = video.fps || 25;
@@ -81,10 +87,15 @@ for (const v of events) {
   }
   const used = recent.get(v.category) || [];
   const scored = cands.map((a) => {
-    const reuse = used.filter((u) => u === a.id).length;
-    // повтор одного и того же дубля подряд — штраф, чтобы не «заедало»
-    const penalty = reuse > 0 ? 0.35 * reuse : 0;
-    return { a, score: distance(v, a, w) + penalty, raw: distance(v, a, w) };
+    const raw = distance(v, a, w);
+    const recentUses = used.filter((u) => u === a.id).length;
+    const totalUses = usedCount.get(a.id) || 0;
+    // Повтор одного и того же дубля — штраф, чтобы шаги не «заедали».
+    // Два слагаемых: свежие повторы (в окне коолдауна) и общий расход дубля
+    // за весь проход. Плавный штраф, а не жёсткий отбор: при узком наборе
+    // подходящих вариантов он не должен выдавить единственно верный.
+    const penalty = 0.35 * recentUses + USAGE_W * totalUses;
+    return { a, raw, recentUses, totalUses, score: raw + penalty };
   }).sort((x, y) => x.score - y.score);
   const best = scored[0];
   const id = best.a.id;

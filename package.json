@@ -15,7 +15,8 @@
     "align": "node tools/align-pass.mjs",
     "place-demo": "node tools/run-place-demo.mjs",
     "place": "node tools/place-foley.mjs",
-    "tc": "node tools/tc.mjs"
+    "tc": "node tools/tc.mjs",
+    "index-library": "node tools/index-library.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
