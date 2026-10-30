@@ -92,9 +92,13 @@ export function videoFor(clip) {
   v.preload = 'auto';
   v.playsInline = true;
   v.muted = true;
-  v.addEventListener('seeked', () => {
-    if (!state.playing) renderFrame(state.time);
-  });
+  // drawCover молча выходит, пока у видео нет кадра (readyState < 2).
+  // Без этих слушателей сцена оставалась чёрной: кадр никто не перерисовывал,
+  // когда видео наконец декодировалось.
+  const repaint = () => { if (!state.playing) renderFrame(state.time); };
+  v.addEventListener('loadeddata', repaint);
+  v.addEventListener('canplay', repaint);
+  v.addEventListener('seeked', repaint);
   clip._video = v;
   return v;
 }
@@ -214,6 +218,23 @@ export function adoptResolution(media) {
 
 /* ---------- рендер кадра ---------- */
 
+/** Подсказка на сцене: клип есть, но кадр ещё не декодировался. */
+function showFrameHint(show) {
+  let hint = document.getElementById('frame-hint');
+  if (!show) {
+    hint?.remove();
+    return;
+  }
+  if (hint) return;
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  hint = document.createElement('div');
+  hint.id = 'frame-hint';
+  hint.className = 'frame-hint';
+  hint.textContent = 'Кадр ещё не декодировался — подождите или нажмите «Пуск»';
+  stage.appendChild(hint);
+}
+
 /** Резерв: показываем кадр самим <video> клипа, когда холст не рисует.
  *  object-fit: cover повторяет геометрию drawCover, так что картинка та же. */
 function renderFallback(t) {
@@ -247,11 +268,13 @@ export function renderFrame(t) {
   const layout = computeLayout();
   const active = layout.filter((it) => t >= it.start && t < it.end);
   const activeIds = new Set();
+  let drewFrame = false;
 
   for (const it of active) {
     const clip = it.clip;
     activeIds.add(clip.id);
     const v = videoFor(clip);
+    if (v.videoWidth && v.readyState >= 2) drewFrame = true;
     const local = clamp(t - it.start + clip.in, 0, Math.max(0, (getMedia(clip.mediaId)?.duration || clip.out) - 0.02));
 
     // плавный дрейф времени: подтягиваем только при заметном расхождении
@@ -274,6 +297,8 @@ export function renderFrame(t) {
   for (const clip of state.clips) {
     if (clip._video && !activeIds.has(clip.id) && !clip._video.paused) clip._video.pause();
   }
+
+  showFrameHint(active.length > 0 && !drewFrame);
 
   // затемнение последнего кадра в самом конце таймлайна
   const total = totalDuration();

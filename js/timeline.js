@@ -11,6 +11,11 @@ let pps = 70; // пикселей на секунду
 const MIN_PPS = 16;
 const MAX_PPS = 240;
 
+// Пока монтажёр сам не трогал зум, таймлайн держит весь проект в окне.
+// Иначе 60-секундный клип при 70 px/с даёт 4240 px содержимого в окне ~1270 px,
+// и приходится отзумивать браузер до 25%, чтобы увидеть картинку.
+let userZoomed = false;
+
 const timelineEl = () => document.getElementById('timeline');
 const rulerEl = () => document.getElementById('ruler');
 const trackEl = () => document.getElementById('track');
@@ -39,6 +44,7 @@ export function initTimeline() {
 
   document.getElementById('zoom-in').addEventListener('click', () => zoom(1.25));
   document.getElementById('zoom-out').addEventListener('click', () => zoom(0.8));
+  document.getElementById('zoom-fit').addEventListener('click', () => fitToWindow());
 
   /* --- скраб по линейке --- */
   const seekFromEvent = (e) => {
@@ -82,8 +88,25 @@ export function initTimeline() {
 }
 
 function zoom(factor) {
+  userZoomed = true;
   pps = clamp(Math.round(pps * factor), MIN_PPS, MAX_PPS);
   render();
+}
+
+/** Подгоняет зум так, чтобы весь проект был виден без горизонтальной прокрутки. */
+export function fitToWindow() {
+  const total = totalDuration();
+  const w = timelineEl().clientWidth - 40;
+  if (total > 0 && w > 0) {
+    pps = clamp(Math.round(w / total), MIN_PPS, MAX_PPS);
+  }
+  userZoomed = false;
+  render();
+}
+
+/** true, если проект сейчас виден целиком (зум не увеличен вручную). */
+export function isFitted() {
+  return !userZoomed;
 }
 
 /** Индекс вставки по X-координате дорожки. */
@@ -100,6 +123,11 @@ function indexForX(x) {
 export function render() {
   const layout = computeLayout();
   const total = totalDuration();
+  // автоподгонка: содержимое не должно быть шире окна, иначе «уезжает вправо»
+  if (!userZoomed && total > 0) {
+    const w = timelineEl().clientWidth - 40;
+    if (w > 0) pps = clamp(Math.round(w / total), MIN_PPS, MAX_PPS);
+  }
   const width = Math.max(total * pps + 40, timelineEl().clientWidth - 2);
 
   rulerEl().style.width = `${width}px`;

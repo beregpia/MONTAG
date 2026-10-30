@@ -13,6 +13,9 @@ const { document, window } = await setupDom();
 const timeline = await import(new URL('../js/timeline.js', import.meta.url).href);
 const state = await import(new URL('../js/state.js', import.meta.url).href);
 
+// навешиваем обработчики кнопок зума, иначе клики в тестах ничего не делают
+timeline.initTimeline();
+
 /* jsdom не считает Layout — задаём ширину вручную, как в браузере. */
 function stubWidth(px) {
   Object.defineProperty(window.HTMLElement.prototype, 'clientWidth', {
@@ -107,4 +110,48 @@ test('линейка: ширина дорожки покрывает клип', 
   const track = document.getElementById('track');
   assert.ok(parseFloat(ruler.style.width) >= 60 * 10, `ширина линейки ${ruler.style.width}`);
   assert.equal(ruler.style.width, track.style.width, 'линейка и дорожка разной ширины');
+});
+
+test('зум: длинный клип не уезжает за окно', () => {
+  stubWidth(1600);
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60); // 60 с при 70 px/с дало бы 4240 px содержимого
+  timeline.render();
+  const ruler = document.getElementById('ruler');
+  const w = parseFloat(ruler.style.width);
+  assert.ok(w <= 1600, `ширина линейки ${w}px при окне 1600px — проект уезжает вправо`);
+  const track = document.getElementById('track');
+  assert.equal(ruler.style.width, track.style.width, 'линейка и дорожка разной ширины');
+  assert.equal(timeline.isFitted(), true);
+});
+
+test('зум: ручное увеличение запоминается и автоподгонка не перебивает', () => {
+  stubWidth(1600);
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  timeline.render();
+  const fitted = parseFloat(document.getElementById('ruler').style.width);
+  document.getElementById('zoom-in').click();
+  assert.equal(timeline.isFitted(), false, 'после ручного зума автоподгонка должна отключиться');
+  const zoomed = parseFloat(document.getElementById('ruler').style.width);
+  assert.ok(zoomed > fitted, `зум не увеличил: ${fitted} -> ${zoomed}`);
+  timeline.render();
+  assert.equal(parseFloat(document.getElementById('ruler').style.width), zoomed,
+    'повторный render сбросил ручной зум');
+});
+
+test('зум: кнопка «Весь проект» возвращает подгонку', () => {
+  stubWidth(1600);
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  timeline.render();
+  document.getElementById('zoom-in').click();
+  assert.equal(timeline.isFitted(), false);
+  document.getElementById('zoom-fit').click();
+  assert.equal(timeline.isFitted(), true);
+  assert.ok(parseFloat(document.getElementById('ruler').style.width) <= 1600,
+    'после «Весь проект» содержимое снова шире окна');
 });

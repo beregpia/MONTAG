@@ -142,3 +142,31 @@ test('без размеров клипа разрешение не трогае�
   assert.equal(state.state.settings.width, w);
   assert.equal(state.state.settings.height, h);
 });
+
+test('кадр не готов: на сцени появляется подсказка, а не молчаливый чёрный экран', () => {
+  document.getElementById('frame-hint')?.remove();
+  // холст рабочий, но кадр видео ещё не декодировался
+  window.HTMLCanvasElement.prototype.getContext = () => ({
+    fillStyle: '', globalAlpha: 1, fillRect() {}, drawImage() {},
+    save() {}, restore() {}, translate() {}, scale() {},
+  });
+  addClip(10);
+  player.initPlayer(document.getElementById('canvas'));
+  player.renderFrame(1);
+  const hint = document.getElementById('frame-hint');
+  assert.ok(hint, 'подсказки нет — пользователь видит чёрный экран без объяснения');
+  assert.match(hint.textContent, /Кадр ещё не декодировался/);
+});
+
+test('кадр готов: подсказка убирается', () => {
+  document.getElementById('frame-hint')?.remove();
+  // видео с готовым кадром: videoWidth задан и readyState достаточный
+  const clip = state.state.clips[0];
+  const v = document.createElement('video');
+  Object.defineProperty(v, 'videoWidth', { get: () => 640 });
+  Object.defineProperty(v, 'videoHeight', { get: () => 360 });
+  Object.defineProperty(v, 'readyState', { get: () => 4 });
+  clip._video = v;
+  player.renderFrame(1);
+  assert.equal(document.getElementById('frame-hint'), null, 'подсказка осталась при готовом кадре');
+});

@@ -480,3 +480,20 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   pointer-events: auto;
   font-size: 12px;
 }
+
+/* ---------- подсказка «кадр ещё не декодировался» ---------- */
+.frame-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(12, 13, 16, .82);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+}
