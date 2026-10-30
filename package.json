@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "node tests/run-all.mjs",
-    "build": "node build-standalone.mjs"
+    "build": "node build-standalone.mjs",
+    "fixtures": "node tools/make-fixtures.mjs",
+    "compare": "node tools/foley-compare.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
