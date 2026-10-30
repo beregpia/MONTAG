@@ -1,0 +1,7 @@
+# Пакетные файлы Windows должны ехать с CRLF: cmd.exe капризничает
+# к LF-переводам внутри блоков goto / for / if ( ).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Остальной текст — как есть, git сам разберётся с переводами.
+* text=auto

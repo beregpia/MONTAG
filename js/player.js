@@ -13,6 +13,7 @@ let clockBase = 0;     // state.time на момент старта воспро
 let clockStart = 0;    // performance.now() на момент старта
 let lastFrameT = 0;    // позиция предыдущего кадра (для фоли-триггеров)
 let frameHook = null;  // (prevT, t) => void — устанавливает модуль фоли
+let fallbackVideo = null; // <video> клипа, встроенный в сцену при неработающем холсте
 
 /** Регистрирует покадровый хук (используется движком фоли). */
 export function setFrameHook(fn) {
@@ -99,11 +100,76 @@ export function videoFor(clip) {
 }
 
 /* ---------- инициализация ---------- */
+
+/** Достаёт 2D-контекст. Некоторые браузеры (Opera GX при жёстком ограничении
+ *  GPU, а также окно `--app=` без аппаратного ускорения) отдают null — тогда
+ *  превью переходит на «сырой» <video>, а не на молчащую шахматку сцены. */
+function acquire2d(el) {
+  for (const opts of [{ alpha: true }, { alpha: true, willReadFrequently: false }, null]) {
+    try {
+      const c = el.getContext('2d', opts);
+      if (c && typeof c.fillRect === 'function') return c;
+    } catch { /* пробуем следующий вариант */ }
+  }
+  return null;
+}
+
+/** Видимое объяснение вместо пустой сцены: что случилось и что делать. */
+function showCanvasWarning() {
+  const stage = document.getElementById('stage');
+  if (!stage || document.getElementById('canvas-warn')) return;
+  const box = document.createElement('div');
+  box.id = 'canvas-warn';
+  box.className = 'canvas-warn';
+  box.innerHTML =
+    '<b>Превью не рисуется: браузер не отдал 2D-контекст холста.</b>' +
+    '<span>Кадры показывает резервный видеослой — монтаж, фоли и экспорт работают, ' +
+    'но переходы и наложение не видны.</span>' +
+    '<span class="small">Что помогает: нажать «Повторить» (GPU мог не успеть запуститься), ' +
+    'включить аппаратное ускорение браузера, обновить браузер, либо открыть приложение ' +
+    'обычным файлом <code>MONTAG.bat</code> вместо окна <code>MONTAG-okno.bat</code>.</span>' +
+    '<button id="canvas-retry" class="btn" type="button">Повторить</button>';
+  stage.appendChild(box);
+  document.getElementById('canvas-retry')?.addEventListener('click', () => retryCanvas());
+}
+
+/** Снимает резервный режим, если холст всё-таки ожил. */
+function clearFallback() {
+  document.getElementById('canvas-warn')?.remove();
+  if (fallbackVideo?.parentNode) fallbackVideo.parentNode.removeChild(fallbackVideo);
+  fallbackVideo = null;
+}
+
+/** Повторная попытка получить контекст: GPU-процесс мог подняться позже страницы. */
+export function retryCanvas() {
+  if (!canvas || ctx) return ctx;
+  ctx = acquire2d(canvas);
+  if (ctx) {
+    clearFallback();
+    applyResolution();
+    renderFrame(state.time);
+  }
+  return ctx;
+}
+
 export function initPlayer(canvasEl) {
   canvas = canvasEl;
-  ctx = canvas.getContext('2d');
+  ctx = acquire2d(canvasEl);
+  if (!ctx) {
+    console.warn('[MONTAG] 2D-контекст холста недоступен — включаю резервный видеослой');
+    showCanvasWarning();
+    // браузер мог не успеть поднять GPU — пробуем сами через некоторое время
+    for (const delay of [400, 2500]) {
+      setTimeout(() => { if (!ctx) retryCanvas(); }, delay);
+    }
+  }
   applyResolution();
   renderFrame(state.time);
+}
+
+/** true, если холст недоступен и превью идёт через <video>. */
+export function canvasBlocked() {
+  return !ctx;
 }
 
 export function applyResolution() {
@@ -114,8 +180,33 @@ export function applyResolution() {
 }
 
 /* ---------- рендер кадра ---------- */
+
+/** Резерв: показываем кадр самим <video> клипа, когда холст не рисует.
+ *  object-fit: cover повторяет геометрию drawCover, так что картинка та же. */
+function renderFallback(t) {
+  const stage = document.getElementById('stage');
+  if (!stage) return;
+  const it = computeLayout().find((x) => t >= x.start && t < x.end);
+  if (!it) {
+    if (fallbackVideo?.parentNode) fallbackVideo.parentNode.removeChild(fallbackVideo);
+    fallbackVideo = null;
+    return;
+  }
+  const v = videoFor(it.clip);
+  if (fallbackVideo !== v) {
+    if (fallbackVideo?.parentNode) fallbackVideo.parentNode.removeChild(fallbackVideo);
+    fallbackVideo = v;
+    v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
+    stage.appendChild(v);
+  }
+  const local = clamp(t - it.start + it.clip.in, 0, 1e9);
+  if (v.readyState >= 1 && Math.abs(v.currentTime - local) > 0.3) {
+    try { v.currentTime = local; } catch { /* ignore */ }
+  }
+}
+
 export function renderFrame(t) {
-  if (!ctx) return;
+  if (!ctx) { renderFallback(t); return; }
   const { width: W, height: H } = state.settings;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
