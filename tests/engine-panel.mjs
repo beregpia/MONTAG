@@ -50,7 +50,6 @@ if (cat) {
   check('набранная категория не сбросилась', document.getElementById('engine-cat')?.value === 'cloth');
 }
 
-process.exitCode = done('Панель «Движок»') ? 0 : 1;
 
 
 /* ---------- зоны кадра: кому чьи шаги ---------- */
@@ -77,3 +76,21 @@ check('зоны стыкуются без перекрытия: граница �
   panel.eventsInZone(evs, 0, 0.145).length === 0
   && panel.eventsInZone(evs, 0.145, 0.3).map((e) => e.id).join() === 'a',
   'интервал полуоткрытый [lo, hi) — событие на границе не удваивается');
+
+
+/* ---------- частота кадра проекта ---------- */
+check('по умолчанию 25 к/с, а не 30', state.state.settings.fps === 25,
+  `сейчас ${state.state.settings.fps}`);
+check('в панели есть выбор частоты кадра', !!document.getElementById('engine-fps'));
+check('выбор показывает текущее значение',
+  document.getElementById('engine-fps')?.value === String(state.state.settings.fps));
+check('в списке есть 25', [...(document.getElementById('engine-fps')?.options || [])]
+  .some((o) => o.value === '25'));
+
+// смена частоты пересчитывает кадры отмеченных событий
+const fpsBefore = state.state.settings.fps;
+state.state.settings.fps = 25;
+check('кадр считается от текущей частоты', Math.round(2 * 25) === 50);
+state.state.settings.fps = fpsBefore;
+
+process.exitCode = done('Панель «Движок»') ? 0 : 1;

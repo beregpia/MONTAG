@@ -361,6 +361,31 @@ function render() {
   if (!body) return;
   body.textContent = '';
 
+  /* --- частота кадра проекта --- */
+  const fpsNow = Number(state.settings.fps) || 25;
+  const fpsSel = el('select', { class: 'select', id: 'engine-fps', title: 'Кадров в секунду в проекте — от неё номера кадров и таймкоды' });
+  for (const v of [24, 25, 30, 50, 60]) {
+    if (!fpsSel.querySelector(`option[value="${v}"]`)) {
+      fpsSel.append(el('option', { value: String(v) }, `${v} к/с`));
+    }
+  }
+  if (![...fpsSel.options].some((o) => Number(o.value) === fpsNow)) {
+    fpsSel.append(el('option', { value: String(fpsNow) }, `${fpsNow} к/с`));
+  }
+  fpsSel.value = String(fpsNow);
+  fpsSel.addEventListener('change', () => {
+    const v = Number(fpsSel.value);
+    if (!(v > 0)) return;
+    state.settings.fps = v;
+    // кадры событий пересчитываем сразу, иначе таймкоды разойдутся с позицией
+    for (const e of events) e.frame = Math.round(e.time * v);
+    toast(`Частота кадра: ${v}. Номера кадров и таймкоды пересчитаны.`);
+    render();
+  });
+  body.append(el('div', { class: 'row' },
+    el('span', { class: 'muted small' }, 'Частота кадра:'), fpsSel,
+    el('span', { class: 'muted small' }, 'от неё номера кадров и таймкоды')));
+
   /* --- 1. дорожки --- */
   body.append(el('h3', {}, '1. Дорожки фоли'));
   body.append(el('p', { class: 'muted small' },

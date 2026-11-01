@@ -184,14 +184,14 @@ export function applyResolution() {
 }
 
 /** Дописывает разрешение клипа в список и выбирает его. */
-function syncResolutionSelect(w, h) {
+export function syncResolutionSelect(w = state.settings.width, h = state.settings.height, label = null) {
   const sel = document.getElementById('resolution');
   if (!sel) return;
   const val = `${w}x${h}`;
   if (![...sel.options].some((o) => o.value === val)) {
     const o = document.createElement('option');
     o.value = val;
-    o.textContent = `${w} × ${h} (как в клипе)`;
+    o.textContent = label || `${w} × ${h} (как в клипе)`;
     sel.append(o);
   }
   sel.value = val;

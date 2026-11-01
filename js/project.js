@@ -2,6 +2,7 @@
 
 import { state, uid, EV, bus, selectClip, clamp } from './state.js';
 import { toast } from './ui.js';
+import * as player from './player.js';
 
 export function saveProject() {
   const data = {
@@ -59,6 +60,20 @@ export async function openProjectFile(file) {
 
   state.clips = clips;
   selectClip(clips[0]?.id ?? null);
+
+  /* настройки сохранялись, но не восстанавливались — при открытии проекта
+     частота кадра и размер молча оставались прежними */
+  const s = data.settings;
+  if (s && typeof s === 'object') {
+    if (Number(s.width) > 0) state.settings.width = Number(s.width);
+    if (Number(s.height) > 0) state.settings.height = Number(s.height);
+    if (Number(s.fps) > 0) state.settings.fps = Number(s.fps);
+    if (Number(s.crossfade) >= 0) state.settings.crossfade = Number(s.crossfade);
+    player.applyResolution();
+    player.syncResolutionSelect(state.settings.width, state.settings.height,
+      `${state.settings.width} × ${state.settings.height} (из проекта)`);
+  }
+
   bus.emit(EV.CLIPS);
 
   if (missing.size) {

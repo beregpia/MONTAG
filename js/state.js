@@ -8,7 +8,7 @@ export const state = {
   foleyGain: 0.9,
   selectedFoleyId: null,
   selectedClipId: null,
-  settings: { width: 1280, height: 720, fps: 30, crossfade: 0.5 },
+  settings: { width: 1280, height: 720, fps: 25, crossfade: 0.5 },
   time: 0,
   playing: false,
 };
