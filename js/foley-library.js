@@ -25,11 +25,26 @@ export function gapFor(name) {
 }
 
 /* «steps 02» → категория «steps», проход «02».
- * Три прохода шагов складываются в одну категорию, и движок выбирает между ними. */
+ * Три прохода шагов складываются в одну категорию, и движок выбирает между ними.
+ *
+ * Хвостовой маркер стороны из моно-сплита — .L, -R, _C, (Lfe) — не часть
+ * категории: «steps 02.L» это тот же steps, проход 02. Без этого три файла
+ * steps 02.L / 03.L / 04.L становились ТРЁМЯ категориями, и движок не видел,
+ * что это проходы одной категории, — брал дубли только из одной дорожки. */
+const SIDE_RE = /[\s._(-]+(?:LFE|LS|RS|[LRC])\s*[)\s._-]*$/i;
+
 export function splitTrackName(name) {
-  const m = String(name).match(/^(.*?)[\s_-]+(\d{1,3})$/);
-  if (m && m[1].trim()) return { category: m[1].trim(), pass: m[2] };
-  return { category: String(name).trim(), pass: '' };
+  const raw = String(name).trim();
+  const bare = raw.replace(SIDE_RE, '').trim();
+  const m = bare.match(/^(.*?)[\s_-]+(\d{1,3})$/);
+  if (m && m[1].trim()) {
+    const cat = m[1].trim().replace(SIDE_RE, '').trim();
+    return { category: cat || m[1].trim(), pass: m[2] };
+  }
+  // номер мог стоять до маркера стороны: «steps.L 02»
+  const m2 = raw.match(/^(.*?)[\s_-]+(\d{1,3})[\s._-]*[LRC](?:FE)?\s*[)\s._-]*$/i);
+  if (m2 && m2[1].trim()) return { category: m2[1].trim(), pass: m2[2] };
+  return { category: bare || raw, pass: '' };
 }
 
 const FRAME = 256;

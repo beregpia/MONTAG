@@ -212,3 +212,26 @@ test('панель: кнопка детектора движения на мес
   assert.ok(src.includes("id: 'engine-detect'"), 'кнопка #engine-detect потерялась');
   assert.match(src, /detBtn\.addEventListener\('click', detectMotionInClip\)/);
 });
+
+/* ---------- маркер стороны из моно-сплита не должен рвать категорию ---------- */
+test('splitTrackName: «steps 02.L» — та же категория steps, проход 02', () => {
+  assert.deepEqual(splitTrackName('steps 02.L'), { category: 'steps', pass: '02' });
+  assert.deepEqual(splitTrackName('steps 03.R'), { category: 'steps', pass: '03' });
+  assert.deepEqual(splitTrackName('steps 04.LFE'), { category: 'steps', pass: '04' });
+  assert.deepEqual(splitTrackName('steps 02 (L)'), { category: 'steps', pass: '02' });
+  assert.deepEqual(splitTrackName('steps-02.L'), { category: 'steps', pass: '02' });
+  assert.deepEqual(splitTrackName('steps.L 02'), { category: 'steps', pass: '02' });
+});
+
+test('splitTrackName: категория из одной буквы не съедается маркером стороны', () => {
+  assert.deepEqual(splitTrackName('MC'), { category: 'MC', pass: '' });
+  assert.deepEqual(splitTrackName('SFX'), { category: 'SFX', pass: '' });
+  assert.deepEqual(splitTrackName('Ambience L'), { category: 'Ambience', pass: '' });
+});
+
+test('splitTrackName: три прохода с .L дают одну категорию и разные проходы', () => {
+  const got = ['steps 02.L', 'steps 03.L', 'steps 04.L'].map(splitTrackName);
+  assert.deepEqual(got.map((g) => g.category), ['steps', 'steps', 'steps']);
+  assert.deepEqual(got.map((g) => g.pass), ['02', '03', '04']);
+  assert.equal(new Set(got.map((g) => `${g.category}#${g.pass}`)).size, 3, 'проходы не должны сливаться');
+});
