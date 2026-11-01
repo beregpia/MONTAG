@@ -395,6 +395,18 @@ export function pause() {
   bus.emit(EV.PLAY, false);
 }
 
+/**
+ * Позиция, с которой началось (или была перемотана) текущее воспроизведение.
+ *
+ * Нужна фоли: интервал кадра — (prev, now], поэтому событие, лежащее ровно на
+ * позиции playhead, не звучит никогда. При ручной отметке это нормально, но
+ * при «▶ Пуск» с playhead на контакте дубль должен прозвучать — иначе кажется,
+ * что дорожки не звучат вовсе.
+ */
+export function playbackStart() {
+  return lastFrameT;
+}
+
 export function toggle() {
   state.playing ? pause() : play();
 }

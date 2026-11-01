@@ -129,10 +129,14 @@ const FR = 1 / 25;
     placementsInFrame(ps, 1.0 - FR, 1.0).join() === '0');
   check('дубль в начале кадра не считается дважды',
     placementsInFrame(ps, 2, 2 + FR).length === 0);
+  check('первый кадр после «Пуск» включает левую границу',
+    placementsInFrame(ps, 2, 2 + FR, true).join() === '1');
+  check('левая граница включается только там, где просят',
+    placementsInFrame(ps, 2, 2 + FR).length === 0);
   check('два дубля внутри одного кадра звучат оба',
     placementsInFrame([{ time: 2.0 }, { time: 2.02 }, { time: 5 }], 2 - FR, 2 + FR).join() === '0,1');
   check('уже звучавший дубль не повторяется',
-    placementsInFrame(ps, 2 - FR, 2, new Set([1])).length === 0);
+    placementsInFrame(ps, 2 - FR, 2, false, new Set([1])).length === 0);
   check('перескок playhead не сыгрывает всё подряд',
     placementsInFrame(ps, 0.5, 30).length === 0);
   check('обратный перескок тоже не сыгрывает',

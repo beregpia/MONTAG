@@ -1,6 +1,6 @@
 /* ============ Таймлайн: клипы, перетаскивание, плейхед, зум ============ */
 
-import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip } from './state.js';
+import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, trackAudible } from './state.js';
 import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
@@ -48,10 +48,15 @@ export function initTimeline() {
   bus.on(EV.CLIPS, render);
   bus.on(EV.MEDIA, render);
   bus.on(EV.SELECT, render);
-  bus.on(EV.TIME, (t) => { updatePlayhead(t); highlightPlayingClip(t); });
+  bus.on(EV.TIME, (t) => {
+    updatePlayhead(t);
+    highlightPlayingClip(t);
+    if (state.playing) keepInView(t);
+  });
   bus.on(EV.FOLEY, render);
   bus.on(EV.PLACEMENTS, render);
   bus.on(EV.TRACKS, render);
+  bus.on(EV.MIX, render);
   window.addEventListener('resize', () => render());
 
   document.getElementById('zoom-in').addEventListener('click', () => zoom(1.25));
@@ -108,12 +113,39 @@ export function initTimeline() {
 }
 
 function zoom(factor) {
+  const el0 = timelineEl();
+  const viewW = el0.clientWidth;
+  // Якорь зума — время в центре окна. Без него при увеличении pps содержимое
+  // растёт вправо, а scrollLeft остаётся: время 0 так и стоит у левого края,
+  // playhead уезжает за правый и пропадает из вида. Монтажёр читает это как
+  // «всё уезжает вправо».
+  const anchorT = viewW > 0 ? (el0.scrollLeft + viewW / 2) / pps : state.time;
   userZoomed = true;
   pps = clamp(Math.round(pps * factor), MIN_PPS, MAX_PPS);
   render();
+  if (viewW > 0) el0.scrollLeft = Math.max(0, Math.round(anchorT * pps - viewW / 2));
+}
+
+/**
+ * Держит playhead в окне при зуме. Без этого при увеличении он уезжает за
+ * правый край на первом же шаге воспроизведения, и смотреть нечего.
+ * В подогнанном виде проект виден целиком, и функция ничего не делает.
+ */
+function keepInView(t) {
+  const el0 = timelineEl();
+  const viewW = el0.clientWidth;
+  if (viewW <= 0) return;
+  const x = t * pps;
+  const left = el0.scrollLeft;
+  if (x < left + 40 || x > left + viewW - 40) {
+    el0.scrollLeft = Math.max(0, Math.round(x - viewW / 2));
+  }
 }
 
 /** Подгоняет зум так, чтобы весь проект был виден без горизонтальной прокрутки. */
+/** Текущий масштаб, px/с. Нужен тестам: якорь зума проверяется по времени. */
+export function timelinePps() { return pps; }
+
 export function fitToWindow() {
   const total = totalDuration();
   const w = timelineEl().clientWidth - 40;
@@ -318,8 +350,10 @@ function renderFoleyTrack(total, width) {
   /* --- размещение движка: строка на каждую дорожку-персонажа --- */
   for (const g of rowGroups(placed)) {
     const row = el('div', { class: 'foley-row' });
+    if (!trackAudible(g.file)) row.classList.add('silent');
     row.append(el('div', { class: 'foley-row-anchor' },
-      el('div', { class: 'foley-row-label', title: g.label }, g.label)));
+      el('div', { class: 'foley-row-label', title: g.label }, g.label),
+      mixButtons(g.file)));
     const lane = el('div', { class: 'foley-lane' });
     for (const p of g.items) {
       if (p.time * pps > width) continue;
@@ -385,6 +419,41 @@ function highlightPlayingClip(t) {
     if (t >= p.time && t <= p.time + Math.max(0.02, p.duration || 0)) { playingId = p.id; break; }
   }
   clips.forEach((c) => c.classList.toggle('playing', c.dataset.pid === playingId));
+}
+
+/**
+ * Мьют и соло дорожки — как в DAW, чтобы можно было слушать персонажа
+ * отдельно, не выгружая проект. Соло сильнее мьюта.
+ *
+ * Кнопки не вызывают render() сами: таймлайн перестраивается на каждом
+ * кадре времени, и render() сюда приводил бы к миганию и потере фокуса.
+ * Смена идёт через шину MIX.
+ */
+function mixButtons(file) {
+  const m = state.mix[file] || { mute: false, solo: false };
+  const anySolo = Object.values(state.mix).some((x) => x.solo);
+  const wrap = el('div', { class: 'foley-mix' });
+
+  const mk = (key, letter, on, title) => {
+    const b = el('button', {
+      class: `foley-mix-btn${on ? ' on' : ''}`,
+      title,
+      'data-file': file,
+      'data-key': key,
+    }, letter);
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const cur = state.mix[file] || { mute: false, solo: false };
+      if (key === 'mute') setTrackMute(file, !cur.mute);
+      else setTrackSolo(file, !cur.solo);
+    });
+    return b;
+  };
+
+  wrap.append(mk('mute', 'M', m.mute, 'Мьют: дорожка не звучит'));
+  wrap.append(mk('solo', 'S', m.solo && !m.mute,
+    anySolo ? 'Соло: звучат только помеченные дорожки' : 'Соло этой дорожки'));
+  return wrap;
 }
 
 /**

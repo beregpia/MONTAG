@@ -1,6 +1,6 @@
 /* ============ Foley-движок: анализ, размещение, триггеры ============ */
 
-import { state, EV, bus, uid, clamp, computeLayout, totalDuration, getMedia, placementsInFrame } from './state.js';
+import { state, EV, bus, uid, clamp, computeLayout, totalDuration, getMedia, placementsInFrame, trackAudible } from './state.js';
 import { detectOnsets, mixToMono } from './onset.js';
 import { synthesize, autoSfxFor } from './sfx.js';
 import * as player from './player.js';
@@ -165,8 +165,13 @@ export function tick(prevT, nowT) {
   }
 
   // размещение движка: звучит настоящий дубль из дорожки, а не синтез
-  for (const i of placementsInFrame(state.placements, prevT, nowT)) {
+  // Первый кадр после «Пуск»/перемотки включает левую границу: событие ровно
+  // на playhead тоже должно звучать. Иначе нажал «Пуск» стоя на контакте —
+  // и ничего не услышал.
+  const fromStart = prevT <= player.playbackStart() + 1e-9;
+  for (const i of placementsInFrame(state.placements, prevT, nowT, fromStart)) {
     const p = state.placements[i];
+    if (!trackAudible(p.file)) continue;   // мьют или чужое соло
     bank.playCut(p.file, p.cutFrom, p.cutTo, when, { ctx, out, gain: state.foleyGain });
   }
 }

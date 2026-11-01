@@ -5,6 +5,9 @@ export const state = {
   clips: [],          // { id, mediaId, in, out, transitionIn, volume, name, _video, _gain }
   foley: [],          // { id, time, sfx, gain, offset, band, strength, detected }
   foleyTracks: [],    // исходные дорожки: { name, category, pass, duration, events }
+  // мьют/соло по дорожке размещения: file -> { mute, solo }. Держится в состоянии,
+  // потому что звук читает его из foley.tick, а кнопки рисует таймлайн.
+  mix: {},
   placements: [],     // размещение движка: { id, time, duration, category, source,
                       //   track, file, cutFrom, cutTo, confidence, review }
   foleyDetected: {},  // mediaId -> [{ time, band, strength }] — найденные моменты контакта
@@ -47,6 +50,7 @@ export const EV = {
   FOLEY: 'foley-changed',
   PLACEMENTS: 'placements-changed',
   TRACKS: 'tracks-changed',
+  MIX: 'mix-changed',
 };
 
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -177,6 +181,28 @@ export function dropSourceTrack(name) {
   bus.emit(EV.TRACKS);
 }
 
+/**
+ * Мьют/соло дорожки. Соло сильнее мьюта: если хоть одна дорожка в соло,
+ * звучат только она — как в любой DAW, иначе кнопка соло ничего не значит.
+ */
+export function setTrackMute(file, v) { setMix(file, 'mute', v); }
+export function setTrackSolo(file, v) { setMix(file, 'solo', v); }
+
+function setMix(file, key, v) {
+  const m = state.mix[file] || (state.mix[file] = { mute: false, solo: false });
+  m[key] = !!v;
+  bus.emit(EV.MIX);
+}
+
+/** Слышна ли дорожка с учётом мьютов и соло. */
+export function trackAudible(file) {
+  const anySolo = Object.values(state.mix).some((m) => m.solo);
+  const m = state.mix[file];
+  if (!m) return !anySolo;
+  if (anySolo) return m.solo && !m.mute;
+  return !m.mute;
+}
+
 /** Сдвиг одного размещения на N секунд (покадровая подгонка). */
 export function nudgePlacement(id, seconds) {
   const p = state.placements.find((x) => x.id === id);
@@ -198,12 +224,21 @@ export function removePlacement(id) {
  * Один и тот же подсчёт нужен и звуку (foley.tick), и подсветке строки
  * в панели движка — иначе предпросмотр и обычное воспроизведение разойдутся.
  */
-export function placementsInFrame(placements, prevT, nowT, done = new Set()) {
+/**
+ * Размещения, попавшие в интервал кадра.
+ *
+ * Интервал полуоткрытый (prev, now] — иначе событие на стыке двух кадров
+ * прозвучало бы дважды. Но первый кадр после «Пуск» или перемотки должен
+ * включать левую границу: если playhead стоит точно на контакте, дубль обязан
+ * звучать. Без этого нажал «▶» на контакте — и ничего не услышал.
+ */
+export function placementsInFrame(placements, prevT, nowT, includeLeft = false, done = new Set()) {
   if (!placements?.length || !(nowT > prevT) || nowT - prevT > 0.5) return [];
   const out = [];
   for (let i = 0; i < placements.length; i++) {
     const t = placements[i].time;
-    if (t > prevT && t <= nowT && !done.has(i)) out.push(i);
+    const inLeft = includeLeft ? t >= prevT - 1e-9 : t > prevT;
+    if (inLeft && t <= nowT && !done.has(i)) out.push(i);
   }
   return out;
 }

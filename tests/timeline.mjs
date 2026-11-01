@@ -251,6 +251,7 @@ test('выравнивание: клип стоит под тем же врем�
 });
 
 const bank = await import(new URL('../js/audio-bank.js', import.meta.url).href);
+const foley = await import(new URL('../js/foley.js', import.meta.url).href);
 
 test('волформа клипа зеркальная и заполненная', () => {
   const data = new Float32Array(4000);
@@ -451,4 +452,111 @@ test('исходники и размещение не мешают друг др
     'волформа исходника не перекрыта клипами размещения');
   assert.ok(document.querySelectorAll('#foley-track .foley-src-tick').length === 3,
     'отметки исходника не потерялись');
+});
+
+/* ---------- мьют и соло дорожек ---------- */
+test('мьют/соло: кнопки на строке дорожки', () => {
+  srcScene();
+  putSrc();
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  const btns = document.querySelectorAll('#foley-track .foley-mix-btn');
+  assert.equal(btns.length, 2, 'M и S на строке дорожки');
+  assert.deepEqual([...btns].map((b) => b.textContent), ['M', 'S']);
+  assert.equal(btns[0].dataset.file, 'steps 02.L.wav', 'кнопка знает свою дорожку');
+});
+
+test('мьют/соло: нажатие гасит дорожку и метит кнопку', () => {
+  srcScene();
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  const m = document.querySelector('#foley-track .foley-mix-btn[data-key="mute"]');
+  m.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  assert.equal(state.state.mix['steps 02.L.wav'].mute, true, 'состояние запомнилось');
+  assert.equal(state.trackAudible('steps 02.L.wav'), false, 'дороже не слышна');
+  assert.ok(document.querySelector('#foley-track .foley-row').classList.contains('silent'),
+    'строка потухла — по таймлайну видно, что дорожка заглушена');
+  const m2 = document.querySelector('#foley-track .foley-mix-btn[data-key="mute"]');
+  assert.ok(m2.classList.contains('on'), 'кнопка M подсвечена');
+});
+
+test('мьют/соло: соло сильнее мьюта', () => {
+  state.state.mix = {};
+  state.setPlacements([
+    { id: 'z1', time: 1, duration: 0.3, file: 'a.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+    { id: 'z2', time: 2, duration: 0.3, file: 'b.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  state.setTrackMute('a.wav', true);
+  state.setTrackSolo('a.wav', true);
+  state.setTrackSolo('b.wav', false);
+  assert.equal(state.trackAudible('a.wav'), false,
+    'замьюченная дорожка молчит, даже если она в соло');
+  assert.equal(state.trackAudible('b.wav'), false,
+    'кто не в соло — молчит, раз соло вообще есть');
+  state.setTrackMute('a.wav', false);
+  assert.equal(state.trackAudible('a.wav'), true, 'сняли мьют — снова слышна');
+});
+
+test('мьют/соло: без соло мьют гасит только свою дорожку', () => {
+  state.state.mix = {};
+  state.setTrackMute('a.wav', true);
+  assert.equal(state.trackAudible('a.wav'), false);
+  assert.equal(state.trackAudible('b.wav'), true, 'чужая дорожка не тронута');
+});
+
+test('мьют/соло: заглушённая дорожка не звучит в тике', () => {
+  state.state.mix = {};
+  bank.putTrack('a.wav', { data: new Float32Array(10000).fill(0.5), sampleRate: 1000 });
+  state.setPlacements([
+    { id: 'z1', time: 1, duration: 0.3, file: 'a.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  state.state.playing = true;
+  const before = SOURCE_STARTS.length;
+  state.setTrackMute('a.wav', true);
+  foley.tick(1 - 1 / 25, 1);
+  assert.equal(SOURCE_STARTS.length, before, 'замьюченная дорожка молчит');
+  state.setTrackMute('a.wav', false);
+  foley.tick(1 - 1 / 25, 1);
+  assert.ok(SOURCE_STARTS.length > before, 'сняли мьют — дубль звучит');
+});
+
+/* ---------- зум не должен выбрасывать содержимое ---------- */
+test('зум: увеличение keeps время в центре, а не уводит его вправо', () => {
+  srcScene();
+  // эмулируем окно: jsdom не считает layout, scrollLeft задаём вручную
+  const tl = document.getElementById('timeline');
+  const viewW = 800;
+  Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => viewW });
+  tl.scrollLeft = 200;
+  const before = timeline.timelinePps();
+  // время в центре окна до зума
+  const anchorT = (tl.scrollLeft + viewW / 2) / before;
+  document.getElementById('zoom-in').click();
+  const after = timeline.timelinePps();
+  assert.ok(after > before, 'зум увеличился');
+  const nowT = (tl.scrollLeft + viewW / 2) / after;
+  assert.ok(Math.abs(nowT - anchorT) < 0.2,
+    `время в центре окна не должно уезжать: было ${anchorT.toFixed(2)}, стало ${nowT.toFixed(2)}`);
+});
+
+test('зум: playhead остаётся в окне при воспроизведении', () => {
+  srcScene();
+  const tl = document.getElementById('timeline');
+  const viewW = 800;
+  Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => viewW });
+  document.getElementById('zoom-in').click();
+  document.getElementById('zoom-in').click();
+  const pps = timeline.timelinePps();
+  // playhead ушёл далеко вправо — таймлайн должен догнать его
+  state.state.playing = true;
+  state.bus.emit(state.EV.TIME, 40);
+  const x = 40 * pps;
+  assert.ok(tl.scrollLeft <= x && x <= tl.scrollLeft + viewW,
+    `playhead должен быть виден: scrollLeft=${tl.scrollLeft}, x=${x}`);
+  state.state.playing = false;
 });

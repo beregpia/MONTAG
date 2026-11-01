@@ -452,6 +452,21 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 }
 .foley-clip.review .foley-clip-label { color: #f0d9a8; }
 
+/* мьют/соло дорожки: как в DAW, но в строке 34 px */
+.foley-mix { display: flex; gap: 2px; margin-left: auto; }
+.foley-mix-btn {
+  width: 15px; height: 15px; padding: 0;
+  font-size: 9px; line-height: 1; font-weight: 700;
+  color: #6f7787; background: #14171d;
+  border: 1px solid #23272f; border-radius: 3px;
+  cursor: pointer;
+}
+.foley-mix-btn:hover { color: #cdd4e0; border-color: #3a4150; }
+.foley-mix-btn.on { color: #0b0d11; background: var(--accent-2); border-color: var(--accent-2); }
+/* заглушённая дорожка видна, но потухшая — как в любой DAW */
+.foley-row.silent .foley-row-label { color: #4a5160; }
+.foley-row.silent .foley-wave path { fill: rgba(120, 132, 152, .25); stroke: #5b6472; }
+
 /* исходные дорожки: своя шкала, поэтому визуально отделены */
 .foley-row.src {
   height: 22px;
