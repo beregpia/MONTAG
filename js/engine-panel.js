@@ -10,11 +10,12 @@
  * Категории берутся из имён дорожек — новых в коде не требуется.
  */
 
-import { state, EV, bus, uid } from './state.js';
+import { state, EV, bus, uid, primaryClipAt } from './state.js';
 import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents } from './foley-place.js';
 import { buildMarkerMidi } from './midi.js';
+import { analyzeVideo } from './vision.js';
 import * as player from './player.js';
 
 /** @type {Array<{id,name,category,pass,minGap,status,index,error}>} */
@@ -117,6 +118,77 @@ function addEventAtPlayhead() {
   });
   events.sort((a, b) => a.time - b.time);
   render();
+}
+
+/* ---------- детектор движения в картинке ---------- */
+let scanning = false;
+let scanAbort = null;
+
+/**
+ * Разбор картинки: грубый проход по всем кадрам + уточнение каждого события.
+ * Движение — это ещё не «шаг»: детектор даёт время и место, категорию задаёт
+ * монтажёр (или он правит её в списке ниже). Точный кадр контакта получается
+ * калибровкой по нескольким ручным отметкам — пик движения приходится на
+ * середину замаха, а не на касание.
+ */
+async function detectMotionInClip() {
+  if (scanning) { scanAbort?.abort(); return; }
+
+  const clip = primaryClipAt(state.time) || state.clips[0];
+  if (!clip) { toast('Сначала добавьте видео на таймлайн', { type: 'error' }); return; }
+  const video = player.videoFor(clip);
+  if (!video || !video.src) { toast('Видео клипа ещё не загрузилось', { type: 'error' }); return; }
+
+  const catInput = document.getElementById('engine-cat');
+  const category = (catInput?.value || '').trim() || 'steps';
+  const fps = Number(state.settings.fps) || 25;
+
+  scanning = true;
+  scanAbort = new AbortController();
+  const btn = document.getElementById('engine-detect');
+  const label = btn ? btn.textContent : '';
+  if (btn) btn.textContent = '⏳ разбор… 0%';
+
+  // разбор идёт через seek — на паузе, иначе позиция прыгает
+  player.pause();
+
+  try {
+    const res = await analyzeVideo(video, {
+      fps,
+      signal: scanAbort.signal,
+      onProgress: (p) => {
+        if (!btn) return;
+        const r = p.phase === 'refine' ? 100 + p.ratio : p.ratio * 100;
+        btn.textContent = `⏳ ${p.phase === 'refine' ? 'уточнение' : 'разбор'} ${Math.min(100, Math.round(r))}%`;
+      },
+    });
+
+    if (!res.events.length) {
+      toast('Движение в клипе не найдено — попробуйте поднять чувствительность', { type: 'warn' });
+      return;
+    }
+
+    for (const e of res.events) {
+      events.push({
+        id: uid('ev'),
+        frame: Math.round(e.time * fps),
+        time: e.time,
+        category,
+        strength: Number((e.strength ?? 0.7).toFixed(2)),
+        duration: Number((e.duration || 0.2).toFixed(2)),
+      });
+    }
+    events.sort((a, b) => a.time - b.time);
+    toast(`Найдено событий: ${res.events.length}. Проверьте категорию — детектор видит движение, а не «шаг».`);
+  } catch (err) {
+    if (scanAbort?.signal.aborted) toast('Разбор отменён');
+    else toast(`Не удалось разобрать картинку: ${err.message || err}`, { type: 'error', timeout: 8000 });
+  } finally {
+    scanning = false;
+    scanAbort = null;
+    if (btn) btn.textContent = label;
+    render();
+  }
 }
 
 /* ---------- размещение ---------- */
@@ -255,7 +327,15 @@ function render() {
   const durInput = el('input', { class: 'input tiny', id: 'engine-duration', type: 'number', min: '0.01', step: '0.01', value: '0.2', title: 'Ожидаемая длительность, с' });
   const addBtn = el('button', { class: 'btn primary', id: 'engine-add' }, '◎ Отметить в кадре');
   addBtn.addEventListener('click', addEventAtPlayhead);
+
+  // детектор движения: сам найдёт моменты в клипе под playhead
+  const detBtn = el('button', { class: 'btn', id: 'engine-detect' }, '🔍 Найти движение');
+  detBtn.title = 'Разобрать картинку клипа и отметить все моменты, где что-то двинулось';
+  detBtn.addEventListener('click', detectMotionInClip);
+
   body.append(el('div', { class: 'row' }, dl, catInput, strInput, durInput, addBtn));
+  body.append(el('div', { class: 'row' }, detBtn,
+    el('span', { class: 'muted small' }, 'детектор видит движение, а не «шаг» — категорию проверьте')));
   body.append(el('div', { class: 'muted small' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
 
