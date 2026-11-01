@@ -170,3 +170,82 @@ test('кадр готов: подсказка убирается', () => {
   player.renderFrame(1);
   assert.equal(document.getElementById('frame-hint'), null, 'подсказка осталась при готовом кадре');
 });
+
+/* ---------- покадровое перемещение ---------- */
+// Пользователь: «видео по кадрам не перемещает». Причина: порог подтягивания
+// видео был 0.3 с, а шаг в кадр — 0.04 с. Время менялось, currentTime видео
+// нет, кадр оставался старым. Порог был в трёх местах.
+function fakeVideo(clip, sets) {
+  const v = {
+    src: 'blob:fake', videoWidth: 1920, readyState: 4, paused: true,
+    currentTime: 0, style: {},
+    play() { this.paused = false; return Promise.resolve(); },
+    pause() { this.paused = true; },
+    addEventListener() {}, removeEventListener() {},
+  };
+  Object.defineProperty(v, 'currentTime', {
+    configurable: true,
+    get() { return this._t || 0; },
+    set(x) { this._t = x; sets.push(x); },
+  });
+  clip._video = v;
+  return v;
+}
+
+test('шаг в кадр двигает и время, и само видео', () => {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  state.state.settings.fps = 25;
+  state.state.playing = false;
+  const sets = [];
+  const v = fakeVideo(state.state.clips[0], sets);
+
+  player.seek(10);
+  const before = sets.length;
+  player.stepFrames(1);
+  assert.equal(state.state.time, 10.04, 'время сдвинулось на кадр');
+  assert.ok(sets.length > before, 'видео получило новую позицию — иначе кадр старый');
+  assert.equal(v.currentTime, 10.04, 'currentTime видео совпадает со временем');
+});
+
+test('шаг в кадр не накапливает погрешность', () => {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  state.state.settings.fps = 25;
+  state.state.playing = false;
+  fakeVideo(state.state.clips[0], []);
+  player.seek(10);
+  for (let i = 0; i < 25; i++) player.stepFrames(1);
+  assert.equal(state.state.time, 11, '25 шагов вправо — ровно секунда, без дрейфа');
+  player.stepFrames(-25);
+  assert.equal(state.state.time, 10, 'и обратно тоже точно');
+});
+
+test('шаг в кадр учитывает fps проекта', () => {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  state.state.settings.fps = 30;
+  state.state.playing = false;
+  fakeVideo(state.state.clips[0], []);
+  player.seek(5);
+  player.stepFrames(1);
+  assert.ok(Math.abs(state.state.time - (5 + 1 / 30)) < 1e-9, 'шаг равен 1/30 с');
+});
+
+test('при воспроизведении частые seek не дергают видео', () => {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  state.state.settings.fps = 25;
+  state.state.playing = true;
+  const sets = [];
+  fakeVideo(state.state.clips[0], sets);
+  player.seek(10);
+  const before = sets.length;
+  player.stepFrames(1);
+  assert.equal(sets.length, before,
+    'на ходу видео и так играет — лишний seek дал бы рывки');
+});

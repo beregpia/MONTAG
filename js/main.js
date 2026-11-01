@@ -144,11 +144,11 @@ function init() {
     // и шаг в секунду промахивался мимо нужного кадра 25 раз.
     else if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      player.seek(state.time - (e.shiftKey ? 1 : 1 / frameRate()));
+      e.shiftKey ? player.seek(state.time - 1) : player.stepFrames(-1);
     }
     else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      player.seek(state.time + (e.shiftKey ? 1 : 1 / frameRate()));
+      e.shiftKey ? player.seek(state.time + 1) : player.stepFrames(1);
     }
     // Масштаб таймлайна с клавиатуры. Проверяем и code, и key: на русской
     // раскладке e.key даёт 'к'/е', а e.code — KeyR/KeyT независимо от языка.

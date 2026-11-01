@@ -84,6 +84,20 @@ export function setClipVolume(clip) {
 }
 
 /* ---------- видео элементы ---------- */
+/**
+ * Ставит видео на позицию в своей шкале времени.
+ *
+ * При воспроизведении подтягиваем только при заметном расхождении — иначе
+ * постоянные seek'и дают рывки. Но на паузе шаг в кадр — это 0.04 с, и порог 0.3
+ * съедал его целиком: время менялось, а кадр оставался старым.
+ */
+function placeVideo(v, local) {
+  if (v.readyState < 1) return;
+  const drift = Math.abs(v.currentTime - local);
+  if (state.playing && drift <= 0.3) return;
+  try { v.currentTime = local; } catch { /* позиция вне доступного диапазона */ }
+}
+
 export function videoFor(clip) {
   if (clip._video) return clip._video;
   const media = getMedia(clip.mediaId);
@@ -253,10 +267,7 @@ function renderFallback(t) {
     v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
     stage.appendChild(v);
   }
-  const local = clamp(t - it.start + it.clip.in, 0, 1e9);
-  if (v.readyState >= 1 && Math.abs(v.currentTime - local) > 0.3) {
-    try { v.currentTime = local; } catch { /* ignore */ }
-  }
+  placeVideo(v, clamp(t - it.start + it.clip.in, 0, 1e9));
 }
 
 export function renderFrame(t) {
@@ -277,10 +288,7 @@ export function renderFrame(t) {
     if (v.videoWidth && v.readyState >= 2) drewFrame = true;
     const local = clamp(t - it.start + clip.in, 0, Math.max(0, (getMedia(clip.mediaId)?.duration || clip.out) - 0.02));
 
-    // плавный дрейф времени: подтягиваем только при заметном расхождении
-    if (v.readyState >= 1 && Math.abs(v.currentTime - local) > 0.3) {
-      try { v.currentTime = local; } catch { /* ignore */ }
-    }
+    placeVideo(v, local);
 
     let opacity = 1;
     if (clip.transitionIn === 'crossfade' && it !== active[0]) {
@@ -376,9 +384,7 @@ function syncPlayback(t) {
   for (const it of active) {
     const v = videoFor(it.clip);
     const local = clamp(t - it.start + it.clip.in, 0, 1e9);
-    if (v.readyState >= 1 && Math.abs(v.currentTime - local) > 0.3) {
-      try { v.currentTime = local; } catch { /* ignore */ }
-    }
+    placeVideo(v, local);
     if (v.paused) v.play().catch(() => { /* ignore */ });
   }
   for (const clip of state.clips) {
@@ -405,6 +411,18 @@ export function pause() {
  */
 export function playbackStart() {
   return lastFrameT;
+}
+
+/**
+ * Шаг на N кадров с привязкой к кадровой сетке.
+ *
+ * Без привязки накопление погрешности уводит playhead: после 25 нажатий
+ * вправо он оказывался на 0.9999 с вместо 1.0, и номер кадра считался неверно.
+ */
+export function stepFrames(n) {
+  const fps = Number(state.settings.fps) || 25;
+  const frame = Math.round(state.time * fps) + n;
+  seek(Math.max(0, frame) / fps);
 }
 
 export function toggle() {
