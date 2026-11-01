@@ -356,6 +356,44 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   display: grid; place-items: center;
   font-size: 11px; color: #565d6b;
 }
+
+/* развёрнутый вид: строка на каждую дорожку-персонажа */
+.foley-track.rows { height: auto; }
+.foley-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 22px;
+  border-top: 1px solid #191c23;
+}
+.foley-row:first-child { border-top: 0; }
+/* Якорь нулевой ширины: подпись не сдвигает полосу, иначе клипы уезжают
+   относительно playhead на её ширину. Sticky держит подпись у левого края
+   при горизонтальной прокрутке. */
+.foley-row-anchor {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: 0 0 0;
+  width: 0;
+  height: 100%;
+}
+.foley-row-label {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 132px;
+  padding: 0 8px 0 6px;
+  font-size: 10px;
+  line-height: 21px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(90deg, #0d0f13 72%, rgba(13, 15, 19, 0));
+  border-right: 1px solid #191c23;
+}
+.foley-lane { position: relative; flex: 1 1 auto; min-width: 0; }
+
 .foley-mark {
   position: absolute;
   top: 5px;
@@ -374,6 +412,49 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .foley-mark:hover { border-color: var(--accent); transform: translateX(-50%) scale(1.12); }
 .foley-mark.selected { border-color: var(--accent); background: var(--accent-soft); }
 .foley-mark.detected { border-style: dashed; }
+
+/* клип размещения: ширина = длительность дубля */
+.foley-clip {
+  position: absolute;
+  top: 3px;
+  height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #23304a, #18202f);
+  border: 1px solid #3d567c;
+  cursor: pointer;
+  overflow: hidden;
+}
+.foley-clip:hover { border-color: var(--accent-2); }
+.foley-clip.review { border-color: #7a5a2a; background: linear-gradient(180deg, #2e2617, #211b12); }
+.foley-wave {
+  position: absolute; inset: 1px 1px auto;
+  height: 8px;
+  opacity: .85;
+}
+.foley-wave svg { display: block; width: 100%; height: 100%; }
+.foley-wave path {
+  fill: none;
+  stroke: #7fb0ff;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.foley-clip.review .foley-wave path { stroke: #e0b264; }
+.foley-clip-label {
+  position: absolute; left: 3px; right: 3px; bottom: 0;
+  font-size: 9px; line-height: 9px;
+  color: #cfe0ff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.foley-clip.review .foley-clip-label { color: #f0d9a8; }
+
+/* свёрнутый ряд */
+.foley-collapsed {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px;
+}
+.foley-collapsed-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.foley-collapsed .spacer { flex: 1; }
 
 /* ---------- drawer Foley ---------- */
 .foley-drawer {
@@ -449,6 +530,9 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 /* строка размещения, которая звучит прямо сейчас в предпросмотре */
 .mini-table tr.preview-now td { background: var(--accent-soft); color: var(--text); }
 .mini-table tr.preview-now td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* дорожки фоли на таймлайне: клип, который звучит прямо сейчас */
+.foley-clip.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.foley-clip.playing .foley-clip-label { color: #fff; }
 .mini-list { max-height: 220px; overflow: auto; border: 1px solid #262c38; border-radius: 8px; }
 .mini-row { display: flex; gap: 10px; align-items: center; padding: 4px 8px; font-size: 12px; border-bottom: 1px solid #1b2029; }
 .mini-row:last-child { border-bottom: none; }

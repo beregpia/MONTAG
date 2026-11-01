@@ -10,13 +10,14 @@
  * Категории берутся из имён дорожек — новых в коде не требуется.
  */
 
-import { state, EV, bus, uid, primaryClipAt } from './state.js';
+import { state, EV, bus, uid, primaryClipAt, setPlacements, currentPreviewRow } from './state.js';
 import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents } from './foley-place.js';
 import { buildMarkerMidi } from './midi.js';
 import { analyzeVideo, calibrateOffset } from './vision.js';
 import * as player from './player.js';
+import * as bank from './audio-bank.js';
 
 /** @type {Array<{id,name,category,pass,minGap,status,index,error}>} */
 let tracks = [];
@@ -26,11 +27,8 @@ let events = [];
 let calMarks = [];
 /** медианное смещение «касание − пик движения», с */
 let calOffset = 0;
-/** моно дорожки длиннее этого не держим в памяти — предпросмотр будет недоступен */
-const PREVIEW_MAX_SAMPLES = 48000 * 20 * 60;   // 20 минут
 /** предпросмотр размещения: играем картинку и вставляем звук из дорожек */
 let previewing = false;
-let previewDone = null;   // Set уже звучавших размещений
 let previewRow = -1;      // какая строка таблицы звучит сейчас
 let lastPreviewT = 0;
 let result = null;
@@ -105,9 +103,9 @@ async function importTracks(fileList) {
       if (t) {
         t.status = 'done';
         t.index = idx;
-        // моно дорожки держим, чтобы можно было прослушать размещение:
-        // звук режется из той же позиции, куда встаёт на картинке
-        t.buffer = mono.length <= PREVIEW_MAX_SAMPLES ? { data: mono, sampleRate: buf.sampleRate } : null;
+        // дорожка остаётся в банке, чтобы её дубли можно было и вырезать,
+        // и проиграть во время воспроизведения
+        t.banked = bank.putTrack(f.name, { data: mono, sampleRate: buf.sampleRate });
       }
     } catch (err) {
       const t = tracks.find((x) => x.id === id);
@@ -239,69 +237,24 @@ async function detectMotionInClip() {
 
 /* ---------- предпросмотр размещения ---------- */
 
-/** Играет вырезанный дубль из дорожки в момент, когда он встаёт на картинке. */
-function playCut(p, when) {
-  if (!p.audio) return;
-  const trk = tracks.find((t) => t.name === (p.audio.file || p.source));
-  if (!trk?.buffer) return;
-  const ctx = player.audioContext();
-  const out = player.getMasterGain?.();
-  if (!ctx || !out) return;
-  const { data, sampleRate } = trk.buffer;
-  const from = Math.max(0, Math.round((p.audio.cutFrom || 0) * sampleRate));
-  const to = Math.min(data.length, Math.round((p.audio.cutTo || 0) * sampleRate));
-  const len = to - from;
-  if (len <= 0) return;
-  const buf = ctx.createBuffer(1, len, sampleRate);
-  buf.copyToChannel(data.subarray(from, to), 0);
-  const src = ctx.createBufferSource();
-  src.buffer = buf;
-  const g = ctx.createGain();
-  g.gain.value = 1;
-  src.connect(g);
-  g.connect(out);
-  try { src.start(when); } catch { /* уже остановилось */ }
-  src.onended = () => { try { g.disconnect(); } catch { /* ignore */ } };
-}
-
-/** Индексы размещений, чьё время перешёл playhead между кадрами. */
-export function placementsInFrame(placements, prevT, nowT, done = new Set()) {
-  if (!placements?.length || !(nowT > prevT) || nowT - prevT > 0.5) return [];
-  const out = [];
-  for (let i = 0; i < placements.length; i++) {
-    const t = placements[i].time;
-    if (t > prevT && t <= nowT && !done.has(i)) out.push(i);
-  }
-  return out;
-}
-
-/** Индекс строки, которая звучит прямо сейчас (последнее прошедшее размещение). */
-export function currentPreviewRow(placements, nowT) {
-  if (!placements?.length) return -1;
-  let cur = -1;
-  for (let i = 0; i < placements.length; i++) if (placements[i].time <= nowT + 1e-6) cur = i;
-  return cur;
-}
-
-/** Покадрово: пуляет дубли, чьё время перешёл playhead, и подсвечивает строку. */
+/**
+ * Покадрово: ведёт подсветку строки, которая звучит сейчас, и сам
+ * останавливается после последнего дубля. Сам звук играет foley.tick() —
+ * один источник на предпросмотр и на обычное воспроизведение, иначе дубль
+ * звучал бы дважды.
+ */
 function previewTick(nowT) {
-  if (!previewing || !result?.placements.length) return;
+  if (!previewing) return;
   const prev = lastPreviewT;
   lastPreviewT = nowT;
-  if (!(nowT > prev) || nowT - prev > 0.5) return;   // перескок — не сыграть всё подряд
-  const ctx = player.audioContext();
-  if (!ctx) return;
-  const when = ctx.currentTime + 0.02;
-  for (const i of placementsInFrame(result.placements, prev, nowT, previewDone)) {
-    previewDone.add(i);
-    playCut(result.placements[i], when);
-  }
-  const current = currentPreviewRow(result.placements, nowT);
+  if (!(nowT > prev) || nowT - prev > 0.5) return;   // перескок — не дёргать подсветку
+  const current = currentPreviewRow(result?.placements || [], nowT);
   if (current !== previewRow) {
     previewRow = current;
     highlightPreviewRow();
   }
-  const last = result.placements[result.placements.length - 1].time;
+  const last = result?.placements.length
+    ? result.placements[result.placements.length - 1].time : 0;
   // render() уничтожает узлы панели — из кадра анимации его звать нельзя,
   // иначе обработчики событий могут потерять свои кнопки на середине клика.
   if (nowT >= last + 0.6) { stopPreview(false); queueMicrotask(render); }
@@ -319,11 +272,13 @@ function highlightPreviewRow() {
 
 function startPreview() {
   if (!result?.placements.length) return;
+  // если слой таймлайна пуст (например, его очистили) — кладём размещение снова,
+  // иначе звук играть будет некому
+  if (!state.placements.length) pushPlacementsToTimeline();
   const ps = result.placements;
   const first = ps[0].time;
   const last = ps[ps.length - 1].time;
   previewing = true;
-  previewDone = new Set();
   previewRow = -1;
   // если playhead уже за последним дублем — начнём сначала
   if (state.time > last || state.time < first - 0.5) player.seek(Math.max(0, first - 0.4));
@@ -336,7 +291,6 @@ function startPreview() {
 /** @param {boolean} updateUi false — когда зовём из кадра анимации. */
 function stopPreview(updateUi = true) {
   previewing = false;
-  previewDone = null;
   previewRow = -1;
   player.pause();
   if (updateUi) render();
@@ -358,7 +312,35 @@ function runPlacement() {
   result = placeEvents(events, library, { fps: Number(state.settings.fps) || 25 });
   render();
   const s = result.summary;
-  toast(`Размещено ${s.placed} из ${s.total}` + (s.missing ? `, без дублей ${s.missing}` : ''));
+  const nPlaced = pushPlacementsToTimeline();
+  toast(`Размещено ${s.placed} из ${s.total}`
+    + (s.missing ? `, без дублей ${s.missing}` : '')
+    + (nPlaced ? ` · на таймлайн добавлено дублей: ${nPlaced}` : ''));
+}
+/**
+ * Кладёт размещение на таймлайн отдельным слоем клипов: строка на персонажа,
+ * ширина клипа — длительность дубля. Слой заменяется целиком, поэтому ручные
+ * события панели «Foley» (state.foley) он не задевает.
+ *
+ * @returns {number} сколько дублей ушло на таймлайн
+ */
+function pushPlacementsToTimeline() {
+  if (!result?.placements.length) { setPlacements([]); return 0; }
+  const list = result.placements.filter((p) => p.audio).map((p) => ({
+    id: p.id || uid('pl'),
+    time: p.time,
+    duration: Math.max(0.02, (p.audio.cutTo || 0) - (p.audio.cutFrom || 0)),
+    category: p.category || '',
+    source: p.source || p.audio.file || '',
+    track: p.audio.track || '',
+    file: p.audio.file || '',
+    cutFrom: p.audio.cutFrom || 0,
+    cutTo: p.audio.cutTo || 0,
+    confidence: p.confidence ?? null,
+    review: !!p.review,
+  }));
+  setPlacements(list);
+  return list.length;
 }
 
 /* ---------- экспорт ---------- */
@@ -688,6 +670,9 @@ function render() {
       'Нажмите «Прослушать»: playhead идёт по таймлайну, и в момент каждого размещения ',
       'звучит дубль, вырезанный из вашей дорожки. В таблице ниже подсвечивается строка, ',
       'которая звучит сейчас.'));
+    body.append(el('div', { class: 'muted small' },
+      'Те же дубли легли на таймлайн внизу — строкой на каждую дорожку, ',
+      'чтобы было видно, чей шаг куда встал. Клик по клипу прослушает его.'));
   }
 
   if (result) {

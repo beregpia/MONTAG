@@ -4,6 +4,8 @@ export const state = {
   media: [],          // { id, name, url, file, duration, width, height, thumb }
   clips: [],          // { id, mediaId, in, out, transitionIn, volume, name, _video, _gain }
   foley: [],          // { id, time, sfx, gain, offset, band, strength, detected }
+  placements: [],     // размещение движка: { id, time, duration, category, source,
+                      //   track, file, cutFrom, cutTo, confidence, review }
   foleyDetected: {},  // mediaId -> [{ time, band, strength }] — найденные моменты контакта
   foleyGain: 0.9,
   selectedFoleyId: null,
@@ -42,6 +44,7 @@ export const EV = {
   TIME: 'time-changed',
   PLAY: 'play-changed',
   FOLEY: 'foley-changed',
+  PLACEMENTS: 'placements-changed',
 };
 
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -137,4 +140,57 @@ export function clearFoley() {
   state.foley = [];
   state.selectedFoleyId = null;
   bus.emit(EV.FOLEY);
+}
+
+/* ---------- размещение движка ---------- */
+
+/** Полная замена слоя размещения (движок пересчитывает его целиком). */
+export function setPlacements(list) {
+  state.placements = list.map((p) => ({ ...p }));
+  bus.emit(EV.PLACEMENTS);
+}
+
+export function clearPlacements() {
+  if (!state.placements.length) return;
+  state.placements = [];
+  bus.emit(EV.PLACEMENTS);
+}
+
+/** Сдвиг одного размещения на N секунд (покадровая подгонка). */
+export function nudgePlacement(id, seconds) {
+  const p = state.placements.find((x) => x.id === id);
+  if (!p) return;
+  p.time = Math.max(0, p.time + seconds);
+  bus.emit(EV.PLACEMENTS);
+}
+
+/** Снятие одного размещения со слоя. */
+export function removePlacement(id) {
+  const i = state.placements.findIndex((x) => x.id === id);
+  if (i === -1) return;
+  state.placements.splice(i, 1);
+  bus.emit(EV.PLACEMENTS);
+}
+
+/**
+ * Индексы размещений, чьё время перешёл playhead между кадрами.
+ * Один и тот же подсчёт нужен и звуку (foley.tick), и подсветке строки
+ * в панели движка — иначе предпросмотр и обычное воспроизведение разойдутся.
+ */
+export function placementsInFrame(placements, prevT, nowT, done = new Set()) {
+  if (!placements?.length || !(nowT > prevT) || nowT - prevT > 0.5) return [];
+  const out = [];
+  for (let i = 0; i < placements.length; i++) {
+    const t = placements[i].time;
+    if (t > prevT && t <= nowT && !done.has(i)) out.push(i);
+  }
+  return out;
+}
+
+/** Индекс строки, которая звучит прямо сейчас (последнее прошедшее размещение). */
+export function currentPreviewRow(placements, nowT) {
+  if (!placements?.length) return -1;
+  let cur = -1;
+  for (let i = 0; i < placements.length; i++) if (placements[i].time <= nowT + 1e-6) cur = i;
+  return cur;
 }

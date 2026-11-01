@@ -168,4 +168,41 @@ check('учтён сдвиг offset у размещённого события',
   parsed2.markers.some((m) => Math.abs(m.time - (nudged.time + (nudged.offset ?? 0))) < 0.002),
   parsed2.markers.map((m) => m.time.toFixed(3)).join(', '));
 
+
+/* ---- 6. размещение движка звучит при обычном воспроизведении ---- */
+{
+  const bank = await import(new URL('audio-bank.js', BASE).href);
+  bank.putTrack('steps 02.L.wav', { data: signal, sampleRate: SR });
+  state.setPlacements([
+    { id: 'p1', time: 1.0, duration: 0.3, category: 'steps', source: 'steps 02.L.wav',
+      file: 'steps 02.L.wav', cutFrom: 0.5, cutTo: 0.8 },
+    { id: 'p2', time: 3.0, duration: 0.3, category: 'steps', source: 'steps 02.L.wav',
+      file: 'steps 02.L.wav', cutFrom: 2.0, cutTo: 2.3 },
+  ]);
+  SOURCE_STARTS.length = 0;
+  state.state.playing = true;
+  foley.tick(0.98, 1.02);
+  check('размещение звучит при обычном воспроизведении', SOURCE_STARTS.length === 1,
+    `запусков ${SOURCE_STARTS.length}`);
+  foley.tick(1.02, 1.04);
+  check('тот же дубль дважды не звучит', SOURCE_STARTS.length === 1);
+  foley.tick(2.98, 3.02);
+  check('следующий дубль звучит в своё время', SOURCE_STARTS.length === 2);
+  SOURCE_STARTS.length = 0;
+  foley.tick(0.98, 30);
+  check('перескок playhead не сыгрывает все дубли подряд', SOURCE_STARTS.length === 0);
+  state.state.playing = false;
+  foley.tick(0.98, 1.02);
+  check('на паузе размещение не звучит', SOURCE_STARTS.length === 0);
+
+  // клип на таймлайне прослушивается по клику
+  SOURCE_STARTS.length = 0;
+  foley.auditionPlacement(state.state.placements[0]);
+  check('клик по клипу прослушивает дубль', SOURCE_STARTS.length === 1);
+  bank.clearBank();
+  foley.auditionPlacement(state.state.placements[0]);
+  check('без дорожки в банке клик молча ничего не делает', SOURCE_STARTS.length === 1);
+  state.clearPlacements();
+}
+
 process.exitCode = done('Foley-подсистема') ? 0 : 1;

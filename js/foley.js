@@ -1,10 +1,11 @@
 /* ============ Foley-движок: анализ, размещение, триггеры ============ */
 
-import { state, EV, bus, uid, clamp, computeLayout, totalDuration, getMedia } from './state.js';
+import { state, EV, bus, uid, clamp, computeLayout, totalDuration, getMedia, placementsInFrame } from './state.js';
 import { detectOnsets, mixToMono } from './onset.js';
 import { synthesize, autoSfxFor } from './sfx.js';
 import * as player from './player.js';
 import { toast } from './ui.js';
+import * as bank from './audio-bank.js';
 
 let foleyBus = null;
 const bufferCache = new Map();
@@ -146,11 +147,12 @@ function playSfx(name, when, { drift = 0, gain = 1, seed = null } = {}) {
 
 /** Покадровый хук: играет события, пересечённые между кадрами. */
 export function tick(prevT, nowT) {
-  if (!state.playing || !state.foley.length) return;
+  if (!state.playing) return;
   if (!(nowT > prevT) || nowT - prevT > 0.5) return; // перескок (seek) — не сыграть всё подряд
   const ctx = player.audioContext();
   if (!ctx) return;
   const when = ctx.currentTime + 0.02;
+  const out = player.getMasterGain();
 
   for (const ev of state.foley) {
     const t = ev.time + ev.offset;
@@ -160,6 +162,12 @@ export function tick(prevT, nowT) {
         gain: (ev.gain ?? 1) * state.foleyGain,
       });
     }
+  }
+
+  // размещение движка: звучит настоящий дубль из дорожки, а не синтез
+  for (const i of placementsInFrame(state.placements, prevT, nowT)) {
+    const p = state.placements[i];
+    bank.playCut(p.file, p.cutFrom, p.cutTo, when, { ctx, out, gain: state.foleyGain });
   }
 }
 
@@ -176,6 +184,14 @@ export function auditionSfx(name) {
   const ctx = player.audioContext();
   if (!ctx) return;
   playSfx(name, ctx.currentTime + 0.02, { gain: state.foleyGain });
+}
+
+/** Прослушать дубль размещения — из той же позиции дорожки. */
+export function auditionPlacement(p) {
+  const ctx = player.audioContext();
+  if (!ctx || !p?.file) return;
+  bank.playCut(p.file, p.cutFrom, p.cutTo, ctx.currentTime + 0.02,
+    { ctx, out: player.getMasterGain(), gain: state.foleyGain });
 }
 
 /** Сдвиг события на N кадров (покадровая подгонка). */

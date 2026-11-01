@@ -93,29 +93,45 @@ state.state.settings.fps = 25;
 check('кадр считается от текущей частоты', Math.round(2 * 25) === 50);
 state.state.settings.fps = fpsBefore;
 
-/* ---------- предпросмотр: что звучит в каждом кадре ---------- */
-/* дельта кадра в приложении ~1/25 с, поэтому и в тестах так же */
-const FR = 1 / 25;
-const ps = [{ time: 1.0 }, { time: 2.0 }, { time: 3.0 }, { time: 4.0 }];
+/* ---------- результат движка уходит на таймлайн ---------- */
+const st = await import(new URL('../js/state.js', import.meta.url).href);
+const fp = await import(new URL('../js/foley-place.js', import.meta.url).href);
 
-check('за кадр звучит только пересечённый дубль',
-  panel.placementsInFrame(ps, 2 - FR, 2).join() === '1');
-check('дубль ровно на границе кадра звучит',
-  panel.placementsInFrame(ps, 1.0 - FR, 1.0).join() === '0');
-check('дубль в начале кадра не считается дважды',
-  panel.placementsInFrame(ps, 2, 2 + FR).length === 0);
-check('два дубля внутри одного кадра звучат оба',
-  panel.placementsInFrame([{ time: 2.0 }, { time: 2.02 }, { time: 5 }], 2 - FR, 2 + FR).join() === '0,1');
-check('уже звучавший дубль не повторяется',
-  panel.placementsInFrame(ps, 2 - FR, 2, new Set([1])).length === 0);
-check('перескок playhead не сыгрывает всё подряд',
-  panel.placementsInFrame(ps, 0.5, 30).length === 0);
-check('обратный перескок тоже не сыгрывает',
-  panel.placementsInFrame(ps, 30, 0.5).length === 0);
-check('строка «звучит сейчас» — последнее прошедшее размещение',
-  panel.currentPreviewRow(ps, 2.5) === 1 && panel.currentPreviewRow(ps, 0.5) === -1
-  && panel.currentPreviewRow(ps, 99) === 3);
-check('до первого дубля подсвечивать нечего', panel.currentPreviewRow(ps, 0.1) === -1);
-check('пустое размещение не ломает подсветку', panel.currentPreviewRow([], 5) === -1);
+const lib = [];
+for (const name of ['steps 02.L.wav', 'steps 03.L.wav']) {
+  for (let i = 0; i < 4; i++) {
+    lib.push({ id: `${name}#${i}`, time: i * 0.6, duration: 0.2, peak: 0.8 - i * 0.05,
+      category: 'steps', track: name, file: name, source: name });
+  }
+}
+const vis = [
+  { id: 'e1', time: 1.0, category: 'steps', source: 'steps 02.L.wav', duration: 0.15 },
+  { id: 'e2', time: 2.4, category: 'steps', source: 'steps 03.L.wav', duration: 0.15 },
+  { id: 'e3', time: 3.9, category: 'steps', source: 'steps 02.L.wav', duration: 0.15 },
+];
+const res = fp.placeEvents(vis, lib, { fps: 25 });
+const withAudio = res.placements.filter((p) => p.audio);
+check('движок даёт дубли для переноса на таймлайн', withAudio.length === 3);
+
+// та же раскладка, что в pushPlacementsToTimeline()
+const mapped = withAudio.map((p) => ({
+  id: p.id, time: p.time,
+  duration: Math.max(0.02, (p.audio.cutTo || 0) - (p.audio.cutFrom || 0)),
+  category: p.category, source: p.source || p.audio.file,
+  track: p.audio.track, file: p.audio.file,
+  cutFrom: p.audio.cutFrom, cutTo: p.audio.cutTo,
+  confidence: p.confidence, review: !!p.review,
+}));
+st.setPlacements(mapped);
+check('на таймлайне столько же клипов, сколько размещений',
+  state.state.placements.length === 3);
+check('клик по клипу сможет играть: есть дорожка и границы вырезки',
+  state.state.placements.every((p) => p.file && p.cutTo > p.cutFrom));
+check('длительность клипа — длительность дубля, а не события',
+  state.state.placements.every((p) => p.duration > 0.02));
+check('персонаж сохраняется — клип попадёт в свою строку',
+  state.state.placements.filter((p) => p.source === 'steps 02.L.wav').length === 2
+  && state.state.placements.filter((p) => p.source === 'steps 03.L.wav').length === 1);
+st.clearPlacements();
 
 process.exitCode = done('Панель «Движок»') ? 0 : 1;

@@ -5,11 +5,18 @@ import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
 import { sfxById } from './sfx.js';
-import { auditionEvent } from './foley.js';
+import { auditionEvent, auditionPlacement } from './foley.js';
+import * as bank from './audio-bank.js';
 
 let pps = 70; // пикселей на секунду
 const MIN_PPS = 16;
 const MAX_PPS = 240;
+
+// Дорожки фоли развёрнуты по умолчанию, когда есть что показать: иначе
+// размещение выполнилось, а на таймлайне по-прежнему ничего не видно.
+// Свёрнутый ряд остаётся escape-hatch'ом — таймлайн не должен отнимать место
+// у картинки без спроса.
+let foleyExpanded = true;
 
 // Пока монтажёр сам не трогал зум, таймлайн держит весь проект в окне.
 // Иначе 60-секундный клип при 70 px/с даёт 4240 px содержимого в окне ~1270 px,
@@ -38,13 +45,19 @@ export function initTimeline() {
   bus.on(EV.CLIPS, render);
   bus.on(EV.MEDIA, render);
   bus.on(EV.SELECT, render);
-  bus.on(EV.TIME, updatePlayhead);
+  bus.on(EV.TIME, (t) => { updatePlayhead(t); highlightPlayingClip(t); });
   bus.on(EV.FOLEY, render);
+  bus.on(EV.PLACEMENTS, render);
   window.addEventListener('resize', () => render());
 
   document.getElementById('zoom-in').addEventListener('click', () => zoom(1.25));
   document.getElementById('zoom-out').addEventListener('click', () => zoom(0.8));
   document.getElementById('zoom-fit').addEventListener('click', () => fitToWindow());
+  document.getElementById('btn-foley-toggle').addEventListener('click', () => {
+    foleyExpanded = !foleyExpanded;
+    syncFoleyToggle();
+    render();
+  });
 
   /* --- скраб по линейке --- */
   const seekFromEvent = (e) => {
@@ -254,35 +267,164 @@ function moveClipTo(clipId, targetIndex) {
   bus.emit(EV.CLIPS);
 }
 
-/** Дорожка фоли: маркеры событий под клипами. */
+/** Дорожка фоли: размещение движка (клипы по персонажам) + метки SFX. */
 function renderFoleyTrack(total, width) {
   const strip = document.getElementById('foley-track');
   if (!strip) return;
   strip.style.width = `${width}px`;
   strip.textContent = '';
+  syncFoleyToggle();
 
-  if (!state.foley.length) {
+  const placed = state.placements.filter((p) => p.file);
+  const marks = state.foley;
+  if (!placed.length && !marks.length) {
+    strip.classList.remove('rows');
     strip.append(el('div', { class: 'foley-track-empty' }, 'фоли-слой пуст — откройте панель 🎙 Foley'));
     return;
   }
 
-  for (const ev of state.foley) {
-    const t = ev.time + (ev.offset ?? 0);
-    if (t * pps > width) continue;
-    const meta = sfxById(ev.sfx);
-    const mark = el('div', {
-      class: `foley-mark${ev.id === state.selectedFoleyId ? ' selected' : ''}${ev.detected ? ' detected' : ''}`,
-      style: `left:${t * pps}px`,
-      title: `${meta.label} · ${fmtTime(t)} · сдвиг ${Math.round((ev.offset ?? 0) * 1000)} мс`,
-    }, meta.icon);
-    mark.addEventListener('click', (e) => {
+  // Один свёрнутый ряд вместо всех: таймлайн не должен расти и отнимать место
+  // у картинки, пока монтажёр не попросит развернуть.
+  if (!foleyExpanded && placed.length) {
+    strip.classList.remove('rows');
+    const bar = el('div', { class: 'foley-collapsed' },
+      el('span', { class: 'foley-collapsed-title' }, 'Фоли на таймлайне'),
+      el('span', { class: 'muted small' },
+        `${placed.length} дубл. · ${rowGroups(placed).length} дорож.`),
+      el('button', { class: 'btn ghost tiny', id: 'foley-expand', title: 'Показать дорожки фоли' }, '▾ Развернуть'));
+    bar.querySelector('#foley-expand').addEventListener('click', (e) => {
       e.stopPropagation();
-      selectFoley(ev.id);
-      player.seek(t);
-      auditionEvent(ev);
+      foleyExpanded = true;
+      render();
     });
-    strip.append(mark);
+    strip.append(bar);
+    return;
   }
+
+  strip.classList.add('rows');
+
+  /* --- размещение движка: строка на каждую дорожку-персонажа --- */
+  for (const g of rowGroups(placed)) {
+    const row = el('div', { class: 'foley-row' });
+    row.append(el('div', { class: 'foley-row-anchor' },
+      el('div', { class: 'foley-row-label', title: g.label }, g.label)));
+    const lane = el('div', { class: 'foley-lane' });
+    for (const p of g.items) {
+      if (p.time * pps > width) continue;
+      lane.append(foleyClip(p));
+    }
+    row.append(lane);
+    strip.append(row);
+  }
+
+  /* --- синтезированные SFX из панели «Foley»: остаются метками --- */
+  if (marks.length) {
+    const row = el('div', { class: 'foley-row' });
+    row.append(el('div', { class: 'foley-row-anchor' },
+      el('div', { class: 'foley-row-label' }, 'SFX')));
+    const lane = el('div', { class: 'foley-lane' });
+    for (const ev of marks) {
+      const t = ev.time + (ev.offset ?? 0);
+      if (t * pps > width) continue;
+      const meta = sfxById(ev.sfx);
+      const mark = el('div', {
+        class: `foley-mark${ev.id === state.selectedFoleyId ? ' selected' : ''}${ev.detected ? ' detected' : ''}`,
+        style: `left:${t * pps}px`,
+        title: `${meta.label} · ${fmtTime(t)} · сдвиг ${Math.round((ev.offset ?? 0) * 1000)} мс`,
+      }, meta.icon);
+      mark.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectFoley(ev.id);
+        player.seek(t);
+        auditionEvent(ev);
+      });
+      lane.append(mark);
+    }
+    row.append(lane);
+    strip.append(row);
+  }
+}
+
+/** Кнопка «▾ Фоли»: подпись отражает состояние и есть ли что показывать. */
+function syncFoleyToggle() {
+  const btn = document.getElementById('btn-foley-toggle');
+  if (!btn) return;
+  const has = state.placements.length > 0;
+  btn.textContent = has && !foleyExpanded ? '▸ Фоли' : '▾ Фоли';
+  btn.title = !has
+    ? 'Дорожек фоли на таймлайне нет'
+    : (foleyExpanded ? 'Свернуть дорожки фоли' : 'Развернуть дорожки фоли');
+}
+
+/** Подсветка клипа, который звучит прямо сейчас. */
+function highlightPlayingClip(t) {
+  const strip = document.getElementById('foley-track');
+  if (!strip || !state.placements.length) return;
+  const clips = strip.querySelectorAll('.foley-clip');
+  if (!clips.length) return;
+  let playingId = null;
+  for (const p of state.placements) {
+    if (t >= p.time && t <= p.time + Math.max(0.02, p.duration || 0)) { playingId = p.id; break; }
+  }
+  clips.forEach((c) => c.classList.toggle('playing', c.dataset.pid === playingId));
+}
+
+/** Группировка размещения по дорожке: своя строка на каждого персонажа. */
+function rowGroups(placed) {  const byFile = new Map();
+  for (const p of placed) {
+    if (!byFile.has(p.file)) byFile.set(p.file, []);
+    byFile.get(p.file).push(p);
+  }
+  return [...byFile.entries()].map(([file, items]) => ({
+    file,
+    label: shortTrackName(file),
+    items: items.sort((a, b) => a.time - b.time),
+  }));
+}
+
+/** Короткое имя дорожки для подписи строки. */
+function shortTrackName(name) {
+  return String(name || '').replace(/\.[^.]+$/, '').slice(0, 22) || 'дорожка';
+}
+
+/** Клип размещения: ширина = длительность дубля, внутри — мини-волформа. */
+function foleyClip(p) {
+  const dur = Math.max(0.02, p.duration || (p.cutTo - p.cutFrom) || 0.12);
+  const w = Math.max(3, dur * pps);
+  const clip = el('div', {
+    class: `foley-clip${p.review ? ' review' : ''}`,
+    style: `left:${p.time * pps}px;width:${w}px`,
+    dataset: { pid: p.id },
+    title: `${p.category || 'звук'} · ${shortTrackName(p.file)} · ${fmtTime(p.time)}`
+      + `\nдубль из ${fmtTime(p.cutFrom)}…${fmtTime(p.cutTo)} дорожки`
+      + (p.review ? '\nнизкая уверенность — стоит проверить' : ''),
+  });
+  const wave = bank.waveform(p.file, 40, p.cutFrom, p.cutTo);
+  if (wave && w >= 10) clip.append(waveformSvg(wave, w));
+  clip.append(el('span', { class: 'foley-clip-label' }, p.category || 'звук'));
+  clip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    player.seek(p.time);
+    auditionPlacement(p);
+  });
+  return clip;
+}
+
+/** Мини-волформа как SVG — дешевле, чем canvas на каждый клип. */
+function waveformSvg(wave, w) {
+  const h = 14;
+  const mid = h / 2;
+  const step = w / Math.max(1, wave.length - 1);
+  let d = '';
+  for (let i = 0; i < wave.length; i++) {
+    const x = (i * step).toFixed(1);
+    const y = (mid - wave[i] * (mid - 1)).toFixed(1);
+    d += `${i ? 'L' : 'M'}${x} ${y}`;
+  }
+  const wrap = el('div', { class: 'foley-wave' });
+  wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+    + `<path d="${d}"/></svg>`;
+  return wrap;
 }
 
 function updatePlayhead(t) {

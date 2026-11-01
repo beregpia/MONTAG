@@ -155,3 +155,97 @@ test('зум: кнопка «Весь проект» возвращает под
   assert.ok(parseFloat(document.getElementById('ruler').style.width) <= 1600,
     'после «Весь проект» содержимое снова шире окна');
 });
+
+/* ---------- дорожки фоли на таймлайне ---------- */
+test('размещение появляется на таймлайне строкой на дорожку', () => {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(30);
+  state.setPlacements([
+    { id: 'p1', time: 1, duration: 0.3, category: 'steps', source: 'A',
+      file: 'steps 02.L.wav', cutFrom: 0.5, cutTo: 0.8 },
+    { id: 'p2', time: 5, duration: 0.4, category: 'steps', source: 'B',
+      file: 'steps 03.L.wav', cutFrom: 1.2, cutTo: 1.6 },
+    { id: 'p3', time: 9, duration: 0.25, category: 'steps', source: 'A',
+      file: 'steps 02.L.wav', cutFrom: 2.0, cutTo: 2.25 },
+  ]);
+  timeline.render();
+
+  const rows = document.querySelectorAll('#foley-track .foley-row');
+  assert.equal(rows.length, 2, 'у каждой дорожки своя строка');
+  const labels = [...document.querySelectorAll('#foley-track .foley-row-label')].map((n) => n.textContent);
+  assert.deepEqual(labels, ['steps 02.L', 'steps 03.L'], 'подписи — имена дорожек без расширения');
+  assert.equal(document.querySelectorAll('#foley-track .foley-clip').length, 3);
+  assert.equal(
+    document.querySelectorAll('#foley-track .foley-row')[0].querySelectorAll('.foley-clip').length, 2,
+    'оба дубля первой дорожки в одной строке');
+});
+
+test('клип шире длинного дубля и уже короткого', () => {
+  state.setPlacements([
+    { id: 'q1', time: 1, duration: 0.2, file: 'a.wav', cutFrom: 0, cutTo: 0.2, category: 'steps' },
+    { id: 'q2', time: 4, duration: 0.9, file: 'a.wav', cutFrom: 0, cutTo: 0.9, category: 'steps' },
+  ]);
+  timeline.render();
+  const [a, b] = [...document.querySelectorAll('#foley-track .foley-clip')];
+  assert.ok(parseFloat(b.style.width) > parseFloat(a.style.width),
+    'ширина клипа должна отражать длительность дубля');
+});
+
+test('клип размещения кликабелен и переносит playhead', () => {
+  state.setPlacements([
+    { id: 'r1', time: 6, duration: 0.3, file: 'a.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  const clip = document.querySelector('#foley-track .foley-clip');
+  assert.ok(clip.dataset.pid === 'r1', 'клип знает своё размещение');
+  clip.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  assert.equal(state.state.time, 6, 'клик по клипу ставит playhead на его начало');
+});
+
+test('пустое размещение не рисует строк', () => {
+  state.setPlacements([]);
+  timeline.render();
+  assert.equal(document.querySelectorAll('#foley-track .foley-row').length, 0);
+});
+
+test('свёрнутый вид: одна строка-итог вместо дорожек', () => {
+  state.setPlacements([
+    { id: 's1', time: 1, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+    { id: 's2', time: 3, duration: 0.3, file: 'steps 03.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  document.getElementById('btn-foley-toggle').click();
+  timeline.render();
+  assert.equal(document.querySelectorAll('#foley-track .foley-row').length, 0, 'строки дорожек скрыты');
+  assert.ok(document.querySelector('.foley-collapsed'), 'вместо них свёрнутый итог');
+  assert.match(document.querySelector('.foley-collapsed').textContent, /2 дубл\. · 2 дорож\./);
+  document.getElementById('btn-foley-toggle').click();
+  timeline.render();
+  assert.equal(document.querySelectorAll('#foley-track .foley-row').length, 2, 'развернулось обратно');
+});
+
+test('выравнивание: клип стоит под тем же временем, что и playhead', () => {
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  const clip = document.querySelector('#foley-track .foley-clip');
+  const playhead = document.getElementById('playhead');
+
+  // эталон — позиция playhead на том же времени: он ставится по времени напрямую
+  const time = 12.5;
+  state.bus.emit(state.EV.TIME, time);
+  const expect = parseFloat(playhead.style.left);
+  assert.ok(expect > 0, 'playhead встал на время');
+  assert.equal(parseFloat(clip.style.left), expect,
+    'левый край клипа должен совпадать с playhead на том же времени');
+
+  // подпись строки не должна сдвигать полосу с клипами
+  const row = document.querySelector('#foley-track .foley-row');
+  const anchor = row.querySelector('.foley-row-anchor');
+  const lane = row.querySelector('.foley-lane');
+  assert.ok(anchor, 'подпись держится нулевым якорём');
+  assert.equal(lane.getBoundingClientRect().left - row.getBoundingClientRect().left, 0,
+    'полоса клипов начинается там же, где и ряд');
+});
