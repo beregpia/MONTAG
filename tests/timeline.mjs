@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setupDom, SOURCE_STARTS } from './helpers.mjs';
+import { readFile } from 'node:fs/promises';
 
 const { document, window } = await setupDom();
 
@@ -559,4 +560,77 @@ test('зум: playhead остаётся в окне при воспроизве�
   assert.ok(tl.scrollLeft <= x && x <= tl.scrollLeft + viewW,
     `playhead должен быть виден: scrollLeft=${tl.scrollLeft}, x=${x}`);
   state.state.playing = false;
+});
+
+/* ---------- кнопки мьют/соло должны быть видимы, а не спрятаны в якоре ---------- */
+test('мьют/соло: кнопки не внутри подписи — иначе их обрежет overflow', () => {
+  srcScene();
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  const row = document.querySelector('#foley-track .foley-row');
+  const label = row.querySelector('.foley-row-label');
+  const mix = row.querySelector('.foley-mix');
+  assert.ok(label && mix, 'подпись и блок кнопок на месте');
+  assert.ok(!label.contains(mix),
+    'кнопки не должны лежать в подписи: у неё overflow:hidden, и они будут невидимы');
+  assert.equal(mix.parentElement, row.querySelector('.foley-row-anchor'),
+    'кнопки живут в якоре подписи, а не в полосе клипов');
+  // якорь нулевой ширины — кнопки обязаны быть абсолютными, иначе получают 0 места
+  assert.equal(row.querySelector('.foley-row-anchor').style.width || '', '',
+    'ширина якоря задаётся CSS, а не инлайном');
+});
+
+test('мьют/соло: кнопки переживают перерисовку таймлайна', () => {
+  srcScene();
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  state.bus.emit(state.EV.TIME, 5);
+  timeline.render();
+  state.bus.emit(state.EV.TIME, 6);
+  timeline.render();
+  assert.equal(document.querySelectorAll('#foley-track .foley-mix-btn').length, 2,
+    'после кадров времени кнопки на месте — таймлайн перерисовывается каждый кадр');
+});
+
+test('панель инструментов таймлайна не обрезает кнопки', async () => {
+  const bar = document.querySelector('.timeline-toolbar');
+  const ids = ['zoom-out', 'zoom-in', 'zoom-fit', 'btn-foley-toggle', 'btn-foley-src'];
+  for (const id of ids) {
+    assert.ok(bar.contains(document.getElementById(id)),
+      `кнопка #${id} живёт в панели инструментов, а не выпадает из неё`);
+  }
+  // перенос строки — единственный способ не обрезать ряд на узком окне
+  const css = await readFile(new URL('../css/style.css', import.meta.url), 'utf8');
+  assert.match(css, /\.timeline-toolbar\s*\{[^}]*flex-wrap:\s*wrap/,
+    'панель инструментов должна переноситься, иначе кнопки уезжают за край');
+});
+
+/* ---------- понятно, где фоли звучит ---------- */
+test('свёрнутый ряд говорит, на каком участке фоли звучит', () => {
+  srcScene();
+  state.setPlacements([
+    { id: 'z1', time: 0.0, duration: 0.33, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.33, category: 'steps' },
+    { id: 'z2', time: 0.33, duration: 0.33, file: 'steps 02.L.wav', cutFrom: 0.33, cutTo: 0.67, category: 'steps' },
+  ]);
+  // свёрнутый вид
+  state.bus.emit(state.EV.PLACEMENTS);
+  document.getElementById('btn-foley-toggle').click();
+  timeline.render();
+  const span = document.getElementById('foley-span');
+  assert.ok(span, 'подпись диапазона есть');
+  assert.match(span.textContent, /звучит 00:00/, 'диапазон назван прямо');
+  assert.match(span.textContent, /% длины/, 'и доля от длины клипа');
+  assert.match(span.textContent, /1% длины/,
+    'два дубля в первую секунду минуты — это ~1%, и это должно быть видно');
+});
+
+test('без размещения подпись диапазона не появляется', () => {
+  srcScene();
+  state.setPlacements([]);
+  document.getElementById('btn-foley-toggle').click();
+  timeline.render();
+  assert.ok(!document.getElementById('foley-span'), 'нечего описывать');
 });

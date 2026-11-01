@@ -335,6 +335,9 @@ function renderFoleyTrack(total, width) {
       el('span', { class: 'foley-collapsed-title' }, 'Фоли на таймлайне'),
       el('span', { class: 'muted small' },
         `${placed.length} дубл. · ${rowGroups(placed).length} дорож.`),
+      // Диапазон звучания — иначе «неслышно» читается как поломка, хотя фоли
+      // просто нет в том месте, где идёт playhead.
+      el('span', { class: 'muted small', id: 'foley-span' }, foleySpan(placed)),
       el('button', { class: 'btn ghost tiny', id: 'foley-expand', title: 'Показать дорожки фоли' }, '▾ Развернуть'));
     bar.querySelector('#foley-expand').addEventListener('click', (e) => {
       e.stopPropagation();
@@ -538,6 +541,21 @@ function syncSrcToggle() {
     ? 'Дорожек фоли не импортировано'
     : (srcExpanded ? 'Свернуть исходные дорожки' : `Показать исходные дорожки (${n})`);
   btn.disabled = n === 0;
+}
+
+/**
+ * Где на таймлайне фоли вообще звучит. Показывает диапазон, а не «есть/нет»:
+ * с двумя дублями в первую секунду минуты playhead на 20-й секунде не услышит
+ * ничего, и без этой подписи это выглядит как поломка звука.
+ */
+function foleySpan(placed) {
+  if (!placed.length) return '';
+  const times = placed.map((p) => p.time).sort((a, b) => a - b);
+  const last = times[times.length - 1];
+  const lastEnd = placed.reduce((m, p) => Math.max(m, p.time + (p.duration || 0)), 0);
+  const cover = lastEnd / Math.max(0.001, totalDuration());
+  const pct = Math.round(cover * 100);
+  return `звучит ${fmtTime(times[0], false)}–${fmtTime(lastEnd, false)} · ${pct}% длины`;
 }
 
 /** Группировка размещения по дорожке: своя строка на каждого персонажа. */
