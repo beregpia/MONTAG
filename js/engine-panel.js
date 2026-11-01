@@ -10,7 +10,7 @@
  * Категории берутся из имён дорожек — новых в коде не требуется.
  */
 
-import { state, EV, bus, uid, primaryClipAt, setPlacements, currentPreviewRow } from './state.js';
+import { state, EV, bus, uid, primaryClipAt, setPlacements, setSourceTrack, currentPreviewRow } from './state.js';
 import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents } from './foley-place.js';
@@ -109,6 +109,11 @@ async function importTracks(fileList) {
         // дорожка остаётся в банке, чтобы её дубли можно было и вырезать,
         // и проиграть во время воспроизведения
         t.banked = bank.putTrack(f.name, { data: mono, sampleRate: buf.sampleRate });
+        // исходная дорожка уходит в состояние: её читает и таймлайн
+        setSourceTrack({
+          name: f.name, category: t.category, pass: t.pass || '',
+          duration: idx.duration, events: idx.events,
+        });
       }
     } catch (err) {
       const t = tracks.find((x) => x.id === id);

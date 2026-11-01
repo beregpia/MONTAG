@@ -452,6 +452,43 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 }
 .foley-clip.review .foley-clip-label { color: #f0d9a8; }
 
+/* исходные дорожки: своя шкала, поэтому визуально отделены */
+.foley-row.src {
+  height: 22px;
+  background: #0b0d11;
+  border-bottom: 1px solid #12151b;
+}
+/* Свёрнутые исходники не должны раздвигать окно: строка уже клипа, а волформа
+ * исходника читается и на такой высоте. */
+.foley-row.src .foley-row-anchor { height: 22px; }
+.foley-row.src .foley-row-label { font-size: 10px; }
+.foley-row.src .foley-row-label { color: #6f7787; }
+.foley-src-head {
+  display: flex; align-items: baseline; gap: 8px;
+  height: 15px; padding: 0 6px;
+  font-size: 10px; color: #6f7787;
+  background: #0a0c10;
+  border-top: 1px solid #191c23;
+  border-bottom: 1px solid #191c23;
+}
+.foley-src-wave {
+  position: absolute; inset: 2px 0 2px 0;
+  opacity: .5;
+}
+.foley-src-wave svg { display: block; width: 100%; height: 100%; }
+.foley-src-wave path {
+  fill: rgba(120, 132, 152, .5);
+  stroke: #7c8798;
+  stroke-width: .5;
+  vector-effect: non-scaling-stroke;
+}
+.foley-src-tick {
+  position: absolute; top: 1px; bottom: 1px; width: 2px;
+  background: #556072;
+  cursor: pointer;
+}
+.foley-src-tick:hover { background: var(--accent-2); width: 3px; }
+
 /* свёрнутый ряд */
 .foley-collapsed {
   position: absolute; inset: 0;

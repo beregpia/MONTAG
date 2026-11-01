@@ -4,6 +4,7 @@ export const state = {
   media: [],          // { id, name, url, file, duration, width, height, thumb }
   clips: [],          // { id, mediaId, in, out, transitionIn, volume, name, _video, _gain }
   foley: [],          // { id, time, sfx, gain, offset, band, strength, detected }
+  foleyTracks: [],    // исходные дорожки: { name, category, pass, duration, events }
   placements: [],     // размещение движка: { id, time, duration, category, source,
                       //   track, file, cutFrom, cutTo, confidence, review }
   foleyDetected: {},  // mediaId -> [{ time, band, strength }] — найденные моменты контакта
@@ -45,6 +46,7 @@ export const EV = {
   PLAY: 'play-changed',
   FOLEY: 'foley-changed',
   PLACEMENTS: 'placements-changed',
+  TRACKS: 'tracks-changed',
 };
 
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -154,6 +156,25 @@ export function clearPlacements() {
   if (!state.placements.length) return;
   state.placements = [];
   bus.emit(EV.PLACEMENTS);
+}
+
+/**
+ * Исходная дорожка: что реально лежит в записи. Держится в состоянии, а не в
+ * панели, потому что её читает и таймлайн, и любой другой потребитель — панель
+ * несёт ещё и состояние интерфейса (статус разбора, ошибки).
+ */
+export function setSourceTrack(t) {
+  const i = state.foleyTracks.findIndex((x) => x.name === t.name);
+  if (i === -1) state.foleyTracks.push({ ...t });
+  else state.foleyTracks[i] = { ...t };
+  bus.emit(EV.TRACKS);
+}
+
+export function dropSourceTrack(name) {
+  const i = state.foleyTracks.findIndex((x) => x.name === name);
+  if (i === -1) return;
+  state.foleyTracks.splice(i, 1);
+  bus.emit(EV.TRACKS);
 }
 
 /** Сдвиг одного размещения на N секунд (покадровая подгонка). */

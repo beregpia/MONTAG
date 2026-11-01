@@ -6,7 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupDom } from './helpers.mjs';
+import { setupDom, SOURCE_STARTS } from './helpers.mjs';
 
 const { document, window } = await setupDom();
 
@@ -289,4 +289,166 @@ test('ширина клипа задаёт плотность волформы',
   const wide = count(4);
   assert.ok(wide > narrow, `широкий клип должен иметь больше точек: ${narrow} -> ${wide}`);
   bank.clearBank();
+});
+
+/* ---------- исходные дорожки ---------- */
+const { FakeAudioContext } = await import(new URL('./helpers.mjs', import.meta.url).href);
+
+/** Дорожка с четырьмя отчётливыми ударами — индексатор найдёт их как шаги. */
+function walkingTrack() {
+  const SR = 48000;
+  const len = SR * 20;
+  const data = new Float32Array(len);
+  for (const t of [1, 3, 5, 7]) {
+    const s = Math.floor(t * SR);
+    for (let i = 0; i < 0.05 * SR && s + i < len; i++) {
+      data[s + i] += 0.9 * Math.exp(-i / (0.01 * SR)) * Math.sin((2 * Math.PI * 90 * i) / SR);
+    }
+  }
+  return { numberOfChannels: 1, length: len, sampleRate: SR, getChannelData: () => data };
+}
+
+/* ---------- исходные дорожки ---------- */
+
+/* Исходные дорожки проверяем на обычном монтаже: минута картинки, подгонка
+ * под окно. Иначе зум от предыдущих тестов сделает pps огромным, и волформа
+ * исходника честно не влезет в окно — тест бы проверял зумирование, а не блок. */
+function srcScene() {
+  // в банке: предыдущие тесты вызывают clearBank(), поэтому кладём заново
+  bank.putTrack('steps 02.L.wav', {
+    data: (() => { const d = new Float32Array(20000); for (let i = 0; i < d.length; i++) d[i] = Math.sin(i / 20); return d; })(),
+    sampleRate: 1000,
+  });
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  stubWidth(1600);
+  timeline.fitToWindow();
+  timeline.render();
+}
+
+/* Свернуть/развернуть исходники в известное состояние: тесты не должны
+ * зависеть от того, в каком состоянии их оставил предыдущий. */
+function setSrc(on) {
+  const btn = document.getElementById('btn-foley-src');
+  const open = btn.textContent.startsWith('▾');
+  if (open !== on) btn.click();
+  timeline.render();
+}
+
+/* Дорожка в банке (для волформы) и в состоянии (для отметок шагов). */
+const SRC_EVENTS = [
+  { time: 1, duration: 0.2, peak: 0.9, strength: 0.8 },
+  { time: 3, duration: 0.2, peak: 0.8, strength: 0.7 },
+  { time: 5, duration: 0.2, peak: 0.7, strength: 0.6 },
+];
+const putSrc = () => state.setSourceTrack({
+  name: 'steps 02.L.wav', category: 'steps', pass: '02', duration: 20, events: SRC_EVENTS,
+});
+
+test('исходники: дорожка в состоянии несёт длительность и шаги', () => {
+  putSrc();
+  assert.equal(state.state.foleyTracks.length, 1);
+  assert.equal(state.state.foleyTracks[0].duration, 20);
+  assert.equal(state.state.foleyTracks[0].events.length, 3);
+  // повторная запись той же дорожки заменяет, а не дублирует
+  state.setSourceTrack({ name: 'steps 02.L.wav', category: 'steps', pass: '02', duration: 21, events: [] });
+  assert.equal(state.state.foleyTracks.length, 1);
+  assert.equal(state.state.foleyTracks[0].duration, 21);
+  putSrc();
+  state.setSourceTrack({ name: 'steps 03.L.wav', category: 'steps', pass: '03', duration: 31, events: [] });
+  assert.equal(state.state.foleyTracks.length, 2);
+  state.dropSourceTrack('steps 03.L.wav');
+  assert.equal(state.state.foleyTracks.length, 1);
+});
+
+test('исходники: блок рисуется с волформой и отметками шагов', () => {
+  srcScene();
+  putSrc();
+  setSrc(true);
+
+  assert.ok(document.querySelector('.foley-src-head'), 'заголовок блока есть');
+  assert.match(document.querySelector('.foley-src-head').textContent, /своя шкала/,
+    'шкала исходников честно названа своей, а не таймлайна');
+
+  const rows = document.querySelectorAll('#foley-track .foley-row.src');
+  assert.equal(rows.length, 1, 'строка исходника отрисовалась');
+  assert.equal(rows[0].querySelector('.foley-row-label').textContent, 'steps 02.L',
+    'подпись — имя дорожки без расширения');
+  assert.ok(document.querySelector('#foley-track .foley-src-wave svg path'),
+    'волформа исходной дорожки нарисована');
+  assert.equal(document.querySelectorAll('#foley-track .foley-src-tick').length, 3,
+    'отметка на каждый найденный шаг');
+});
+
+test('исходники: шкала исходников не равна таймлайну', () => {
+  srcScene();
+  putSrc();
+  setSrc(true);
+  const row = document.querySelector('#foley-track .foley-row.src');
+  const clipRow = document.querySelector('#foley-track .foley-row:not(.src)');
+  // у исходной дорожки своя ширина (20 с записи), у размещения — своя
+  const srcW = parseFloat(row.querySelector('.foley-lane').style.width);
+  const total = timeline.timelineWidth ? timeline.timelineWidth() : 0;
+  assert.ok(srcW > 0, 'полоса исходника имеет ширину');
+  assert.ok(srcW < total || total === 0,
+    'запись короче монтажа: 20 с исходника против 60 с таймлайна');
+  assert.ok(!document.querySelector('#foley-track .src-playhead'),
+    'playhead по исходникам не идёт — шкалы не совпадают, и это не баг');
+});
+
+test('исходники: отметка шага прослушивает тейк', () => {
+  srcScene();
+  putSrc();
+  setSrc(true);
+  const tick = document.querySelector('#foley-track .foley-src-tick');
+  assert.ok(tick, 'отметка есть');
+  assert.match(tick.title, /сила/, 'подсказка показывает силу шага');
+  const before = SOURCE_STARTS.length;
+  tick.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  assert.ok(SOURCE_STARTS.length > before, 'клик по отметке запускает звук');
+  assert.ok(SOURCE_STARTS[SOURCE_STARTS.length - 1].buffer,
+    'звучит буфер, а не пустой запуск');
+});
+
+test('исходники: кнопка гаснет без дорожек и работает с ними', () => {
+  srcScene();
+  putSrc();
+  setSrc(true);
+  const btn = document.getElementById('btn-foley-src');
+  assert.equal(btn.disabled, false, 'дорожка есть — кнопка активна');
+  state.state.foleyTracks.length = 0;
+  timeline.render();
+  assert.equal(btn.disabled, true, 'без дорожек показывать нечего');
+  assert.match(btn.title, /не импортировано/);
+  putSrc();
+  timeline.render();
+  assert.equal(btn.disabled, false);
+});
+
+test('исходники: свёрнутый блок не добавляет высоты', () => {
+  srcScene();
+  putSrc();
+  setSrc(false);
+  timeline.render();
+  assert.equal(document.querySelectorAll('.foley-src-head').length, 0, 'заголовка нет');
+  assert.equal(document.querySelectorAll('#foley-track .foley-row.src').length, 0,
+    'строк исходников в DOM нет — они не висят свёрнутыми');
+  assert.equal(document.getElementById('btn-foley-src').textContent, '▸ Исходники');
+});
+
+test('исходники и размещение не мешают друг другу', () => {
+  srcScene();
+  putSrc();
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  setSrc(true);
+  assert.equal(document.querySelectorAll('#foley-track .foley-clip').length, 1, 'клип размещения на месте');
+  assert.equal(document.querySelectorAll('#foley-track .foley-row.src').length, 1,
+    'строка исходника на месте');
+  assert.ok(document.querySelector('#foley-track .foley-src-wave svg path'),
+    'волформа исходника не перекрыта клипами размещения');
+  assert.ok(document.querySelectorAll('#foley-track .foley-src-tick').length === 3,
+    'отметки исходника не потерялись');
 });

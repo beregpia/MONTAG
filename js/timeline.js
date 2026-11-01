@@ -17,6 +17,9 @@ const MAX_PPS = 240;
 // Свёрнутый ряд остаётся escape-hatch'ом — таймлайн не должен отнимать место
 // у картинки без спроса.
 let foleyExpanded = true;
+// Исходные дорожки свёрнуты по умолчанию: они полезны при выборе материала, но
+// стоят вертикального места, а место на таймлайне отбирают у картинки.
+let srcExpanded = false;
 
 // Пока монтажёр сам не трогал зум, таймлайн держит весь проект в окне.
 // Иначе 60-секундный клип при 70 px/с даёт 4240 px содержимого в окне ~1270 px,
@@ -48,6 +51,7 @@ export function initTimeline() {
   bus.on(EV.TIME, (t) => { updatePlayhead(t); highlightPlayingClip(t); });
   bus.on(EV.FOLEY, render);
   bus.on(EV.PLACEMENTS, render);
+  bus.on(EV.TRACKS, render);
   window.addEventListener('resize', () => render());
 
   document.getElementById('zoom-in').addEventListener('click', () => zoom(1.25));
@@ -55,7 +59,10 @@ export function initTimeline() {
   document.getElementById('zoom-fit').addEventListener('click', () => fitToWindow());
   document.getElementById('btn-foley-toggle').addEventListener('click', () => {
     foleyExpanded = !foleyExpanded;
-    syncFoleyToggle();
+    render();
+  });
+  document.getElementById('btn-foley-src').addEventListener('click', () => {
+    srcExpanded = !srcExpanded;
     render();
   });
 
@@ -274,10 +281,15 @@ function renderFoleyTrack(total, width) {
   strip.style.width = `${width}px`;
   strip.textContent = '';
   syncFoleyToggle();
+  syncSrcToggle();
 
   const placed = state.placements.filter((p) => p.file);
   const marks = state.foley;
-  if (!placed.length && !marks.length) {
+  const srcs = state.foleyTracks;
+  // Исходники — тоже повод рисовать дорожку: материал часто смотрят до того,
+  // как что-либо разместили. Раньше здесь стоял ранний возврат только по
+  // размещению и меткам, и блок исходников не появлялся вовсе.
+  if (!placed.length && !marks.length && !srcs.length) {
     strip.classList.remove('rows');
     strip.append(el('div', { class: 'foley-track-empty' }, 'фоли-слой пуст — откройте панель 🎙 Foley'));
     return;
@@ -315,6 +327,12 @@ function renderFoleyTrack(total, width) {
     }
     row.append(lane);
     strip.append(row);
+  }
+
+  /* --- исходные дорожки: своя шкала времени --- */
+  if (srcExpanded) {
+    strip.append(sourceHead());
+    for (const t of state.foleyTracks) strip.append(sourceRow(t, width));
   }
 
   /* --- синтезированные SFX из панели «Foley»: остаются метками --- */
@@ -367,6 +385,90 @@ function highlightPlayingClip(t) {
     if (t >= p.time && t <= p.time + Math.max(0.02, p.duration || 0)) { playingId = p.id; break; }
   }
   clips.forEach((c) => c.classList.toggle('playing', c.dataset.pid === playingId));
+}
+
+/**
+ * Исходная дорожка: волформа всей записи и отметки найденных шагов.
+ *
+ * Шкала здесь СВОЯ, не таймлайна: время в записи не совпадает со временем
+ * монтажа — именно поэтому расстановка и существует. Playhead по этой полосе
+ * не идёт, и это не баг.
+ */
+function sourceRow(t, width) {
+  const w = Math.max(0, (t.duration || 0) * pps);
+  const row = el('div', { class: 'foley-row src' });
+  row.append(el('div', { class: 'foley-row-anchor' },
+    el('div', { class: 'foley-row-label', title: `${t.name} · ${t.events.length} шагов` },
+      shortTrackName(t.name))));
+  const lane = el('div', { class: 'foley-lane', style: `width:${Math.max(w, 1)}px` });
+  if (w > 0 && w <= width + 4) {
+    const points = Math.max(24, Math.min(240, Math.round(w * 2)));
+    const wave = bank.waveform(t.name, points, 0, t.duration);
+    if (wave) lane.append(sourceWaveform(wave, w));
+  }
+  for (const e of t.events) {
+    if (e.time * pps > width) continue;
+    lane.append(sourceTick(e, t));
+  }
+  row.append(lane);
+  return row;
+}
+
+/** Волформа исходной дорожки: та же зеркальная заливка, что у клипа. */
+function sourceWaveform(wave, w) {
+  const h = 100;
+  const mid = h / 2;
+  const step = w / Math.max(1, wave.length - 1);
+  let d = '';
+  for (let i = 0; i < wave.length; i++) {
+    const x = (i * step).toFixed(2);
+    d += `${i ? 'L' : 'M'}${x} ${(mid - wave[i] * (mid - 3)).toFixed(2)}`;
+  }
+  for (let i = wave.length - 1; i >= 0; i--) {
+    const x = (i * step).toFixed(2);
+    d += `L${x} ${(mid + wave[i] * (mid - 3)).toFixed(2)}`;
+  }
+  const wrap = el('div', { class: 'foley-src-wave' });
+  wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+    + `<path d="${d}Z"/></svg>`;
+  return wrap;
+}
+
+/** Отметка шага в исходной дорожке. Клик прослушивает тейк. */
+function sourceTick(e, t) {
+  const tick = el('div', {
+    class: 'foley-src-tick',
+    style: `left:${e.time * pps}px`,
+    title: `${fmtTime(e.time)} · сила ${Math.round((e.strength ?? 0) * 100)}%`
+      + ` · длина ${(e.duration || 0).toFixed(2)} с\nклик — прослушать`,
+  });
+  tick.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    bank.playCut(t.name, Math.max(0, e.time - 0.05), e.time + (e.duration || 0.2) + 0.05,
+      (player.audioContext()?.currentTime ?? 0) + 0.02,
+      { ctx: player.audioContext(), out: player.getMasterGain(), gain: state.foleyGain });
+  });
+  return tick;
+}
+
+/** Заголовок блока исходников — чтобы шкала не путалась с таймлайном. */
+function sourceHead() {
+  return el('div', { class: 'foley-src-head' },
+    el('span', {}, 'исходные дорожки'),
+    el('span', { class: 'muted small' }, 'своя шкала времени, не таймлайн — '
+      + 'клик по отметке прослушивает тейк'));
+}
+
+/** Кнопка «🎞 Исходники»: подпись отражает состояние. */
+function syncSrcToggle() {
+  const btn = document.getElementById('btn-foley-src');
+  if (!btn) return;
+  const n = state.foleyTracks.length;
+  btn.textContent = srcExpanded ? '▾ Исходники' : '▸ Исходники';
+  btn.title = !n
+    ? 'Дорожек фоли не импортировано'
+    : (srcExpanded ? 'Свернуть исходные дорожки' : `Показать исходные дорожки (${n})`);
+  btn.disabled = n === 0;
 }
 
 /** Группировка размещения по дорожке: своя строка на каждого персонажа. */
