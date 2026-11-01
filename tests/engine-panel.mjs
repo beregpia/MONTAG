@@ -193,6 +193,22 @@ state.state.clips.push({ id: 'c9', mediaId: 'm9', in: 0, out: 5, transitionIn: '
 panel.initEnginePanel();
 check('недогруженное видео не роняет панель', !!document.getElementById('engine-detect'));
 
+/* ---------- чувствительность детектора ---------- */
+// Приложение долго советовало «поднять чувствительность», не имея такой
+// настройки. Теперь ползунок есть — и он правда меняет порог.
+check('ползунок чувствительности на месте', !!document.getElementById('engine-sens'));
+check('значение по умолчанию разумное',
+  Number(document.getElementById('engine-sens').value) === 0.55);
+check('подпись ползунка объясняет направление',
+  /меньше — найдёт больше шагов/.test(document.getElementById('engine-body').textContent));
+
+const sensEl = document.getElementById('engine-sens');
+sensEl.value = '0.2';
+sensEl.dispatchEvent(new window.Event('input', { bubbles: true }));
+const sensRow = document.getElementById('engine-sens').parentElement;
+check('ползунок меняет значение и подпись рядом',
+  sensRow.querySelector('b').textContent === '0.20');
+
 process.exitCode = done('Панель «Движок»') ? 0 : 1;
 
 /* ---------- порядок обучения: автомат первым ---------- */

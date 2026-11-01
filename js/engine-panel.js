@@ -166,6 +166,9 @@ function addEventAtPlayhead() {
 
 /* ---------- детектор движения в картинке ---------- */
 let scanning = false;
+// Чувствительность детектора: правда влияет на порог. Раньше приложение
+// советовало её «поднять», а настройки не было — теперь она есть и видна.
+let sensitivity = 0.55;
 let scanAbort = null;
 
 /**
@@ -207,6 +210,7 @@ async function detectMotionInClip() {
   try {
     const res = await analyzeVideo(video, {
       fps,
+      sensitivity,
       signal: scanAbort.signal,
       onProgress: (p) => {
         if (!btn) return;
@@ -216,7 +220,8 @@ async function detectMotionInClip() {
     });
 
     if (!res.events.length) {
-      toast('Движение в клипе не найдено — попробуйте поднять чувствительность', { type: 'warn' });
+      toast('Движение не найдено. Уменьшите чувствительность в панели — '
+        + 'или отметьте шаги вручную кнопкой «◎ Отметить в кадре».', { type: 'warn', timeout: 9000 });
       return;
     }
 
@@ -630,6 +635,24 @@ function render() {
       'движок отметит весь клип · ручная отметка — для промахов и тихого')));
   body.append(el('div', { class: 'row' }, catInput, strInput, durInput,
     el('span', { class: 'muted small' }, 'категория, сила и длина для ручной отметки')));
+
+  /* Чувствительность детектора. Раньше приложение советовало «поднять
+   * чувствительность», а настройки не существовало — монтажёр шёл искать то,
+   * чего нет. Ползунок есть, и он правда меняет порог. */
+  const sens = el('input', {
+    class: 'input tiny', id: 'engine-sens', type: 'range',
+    min: '0.1', max: '1.5', step: '0.05', value: String(sensitivity),
+    title: 'Чувствительность детектора: ниже — больше событий, выше — только '
+      + 'самые заметные. Если шагов мало, уменьшите.',
+  });
+  const sensOut = el('b', {}, sensitivity.toFixed(2));
+  sens.addEventListener('input', () => {
+    sensitivity = Number(sens.value);
+    sensOut.textContent = sensitivity.toFixed(2);
+  });
+  body.append(el('div', { class: 'row' }, sens, sensOut,
+    el('span', { class: 'muted small' },
+      'чувствительность: меньше — найдёт больше шагов')));
   body.append(el('div', { class: 'muted small', id: 'engine-readout' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
 

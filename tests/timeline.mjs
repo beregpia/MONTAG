@@ -529,19 +529,37 @@ test('мьют/соло: заглушённая дорожка не звучит
 });
 
 /* ---------- зум не должен выбрасывать содержимое ---------- */
-test('зум: увеличение keeps время в центре, а не уводит его вправо', () => {
+test('зум: playhead в окне — масштаб якорится на него', () => {
   srcScene();
-  // эмулируем окно: jsdom не считает layout, scrollLeft задаём вручную
   const tl = document.getElementById('timeline');
   const viewW = 800;
   Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => viewW });
-  tl.scrollLeft = 200;
-  const before = timeline.timelinePps();
-  // время в центре окна до зума
-  const anchorT = (tl.scrollLeft + viewW / 2) / before;
+  // playhead на 26-й секунде — в окне, значит зум должен держать его
+  state.bus.emit(state.EV.TIME, 26);
+  const pps = timeline.timelinePps();
+  tl.scrollLeft = Math.max(0, Math.round((timeline.timelineGutter() + 26 * pps) - viewW / 2));
+  const before = tl.scrollLeft;
+
   document.getElementById('zoom-in').click();
   const after = timeline.timelinePps();
-  assert.ok(after > before, 'зум увеличился');
+  assert.ok(after > pps, 'масштаб увеличился');
+  const phX = timeline.timelineGutter() + 26 * after;
+  assert.ok(phX >= tl.scrollLeft && phX <= tl.scrollLeft + viewW,
+    `playhead должен остаться в окне: scrollLeft=${tl.scrollLeft}, playhead=${phX}`);
+});
+
+test('зум: playhead за окном — масштаб якорится на центр', () => {
+  srcScene();
+  const tl = document.getElementById('timeline');
+  const viewW = 800;
+  Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => viewW });
+  state.bus.emit(state.EV.TIME, 0);          // playhead ушёл влево из вида
+  const pps = timeline.timelinePps();
+  tl.scrollLeft = 4000;                       // далеко вправо
+  const anchorT = (4000 + viewW / 2) / pps;
+
+  document.getElementById('zoom-in').click();
+  const after = timeline.timelinePps();
   const nowT = (tl.scrollLeft + viewW / 2) / after;
   assert.ok(Math.abs(nowT - anchorT) < 0.2,
     `время в центре окна не должно уезжать: было ${anchorT.toFixed(2)}, стало ${nowT.toFixed(2)}`);

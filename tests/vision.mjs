@@ -11,6 +11,10 @@ const V = await import(new URL('../js/vision.js', import.meta.url).href);
 
 const GW = 32;
 const GH = 18;
+const GRID_W = GW;
+const GRID_H = GH;
+const analyzeFrames = V.analyzeFrames;
+const detectMotionEvents = V.detectMotionEvents;
 
 /**
  * Синтетическая сцена: ровный фон и «объект» — вертикальная полоска,
@@ -161,4 +165,45 @@ test('калибровка игнорирует метки далеко от с�
   const cal = V.calibrateOffset([{ time: 12.0 }], res.events, fps);
   assert.equal(cal.used, 0, 'метка в 12 с не должна сопоставиться с событием в ~4 с');
   assert.equal(cal.offset, 0);
+});
+
+/* ---------- чувствительность по умолчанию ---------- */
+// Дефолт был 1.0 — порог на 90-м процентиле, и на обычной ходьбе терялось
+// больше половины шагов. Пользователь: «размещает только 3 кадра».
+test('дефолтная чувствительность находит и слабые шаги', () => {
+  const frames = [];
+  for (let i = 0; i < 240; i++) {
+    const t = i / 12;
+    const m = t % 0.6;
+    const step = m < 0.18 ? Math.exp(-Math.pow(m - 0.09, 2) / 0.004) : 0;
+    const f = new Float32Array(GRID_W * GRID_H);
+    for (let c = 0; c < f.length; c++) {
+      f[c] = 0.05 + 0.02 * Math.sin(t * 3 + c);
+      if (c % 7 === 3) f[c] += 0.5 * step;
+    }
+    frames.push(f);
+  }
+  const res = analyzeFrames(frames, 12, {});
+  // в 20 с при каденции 0.6 с шагов ~33
+  assert.ok(res.events.length >= 25,
+    `дефолт должен находить почти все шаги, нашёл ${res.events.length} из ~33`);
+});
+
+test('чувствительность управляет порогом в обе стороны', () => {
+  const frames = [];
+  for (let i = 0; i < 240; i++) {
+    const t = i / 12;
+    const m = t % 0.6;
+    const step = m < 0.18 ? Math.exp(-Math.pow(m - 0.09, 2) / 0.004) : 0;
+    const f = new Float32Array(GRID_W * GRID_H);
+    for (let c = 0; c < f.length; c++) {
+      f[c] = 0.05 + 0.02 * Math.sin(t * 3 + c);
+      if (c % 7 === 3) f[c] += 0.5 * step;
+    }
+    frames.push(f);
+  }
+  const res = analyzeFrames(frames, 12, {});
+  const low = detectMotionEvents(res.curve, res.times, { sensitivity: 0.2 }).length;
+  const high = detectMotionEvents(res.curve, res.times, { sensitivity: 1.5 }).length;
+  assert.ok(low > high, `ниже порог — больше событий: ${low} против ${high}`);
 });

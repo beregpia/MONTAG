@@ -120,14 +120,24 @@ export function initTimeline() {
   render();
 }
 
+/** Масштаб таймлайна с клавиатуры (R/T) из панели горячих клавиш. */
+export function zoomTimeline(factor) {
+  zoom(factor);
+}
+
 function zoom(factor) {
   const el0 = timelineEl();
   const viewW = el0.clientWidth;
-  // Якорь зума — время в центре окна. Без него при увеличении pps содержимое
-  // растёт вправо, а scrollLeft остаётся: время 0 так и стоит у левого края,
-  // playhead уезжает за правый и пропадает из вида. Монтажёр читает это как
-  // «всё уезжает вправо».
-  const anchorT = viewW > 0 ? (el0.scrollLeft + viewW / 2) / pps : state.time;
+  // Якорь зума — playhead, если он в окне, иначе центр окна.
+  //
+  // Якорь по центру был неправильным: при увеличении масштаба картинка
+  // менялась посредине экрана, а не там, где работает монтажёр. Если playhead
+  // стоит в начале, после зума он казалось бы не двигается — «масштаб не
+  // получился».
+  const phX = GUTTER + state.time * pps;
+  const left = el0.scrollLeft;
+  const phVisible = viewW > 0 && phX >= left && phX <= left + viewW;
+  const anchorT = viewW <= 0 || phVisible ? state.time : (left + viewW / 2) / pps;
   userZoomed = true;
   pps = clamp(Math.round(pps * factor), MIN_PPS, MAX_PPS);
   render();
@@ -566,6 +576,7 @@ function sourceWaveform(wave, w) {
   }
   const wrap = el('div', { class: 'foley-src-wave' });
   wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+    + `<line class="axis" x1="0" y1="${mid}" x2="${w}" y2="${mid}"/>`
     + `<path d="${d}Z"/></svg>`;
   return wrap;
 }
@@ -685,7 +696,10 @@ function waveformSvg(wave, w) {
     d += `L${x} ${(mid + wave[i] * (mid - 2)).toFixed(2)}`;
   }
   const wrap = el('div', { class: 'foley-wave' });
+  // Ось нуля — как в Pro Tools: без неё зеркальная фигура читается как
+  // «две волны», а не как одна вокруг середины.
   wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
+    + `<line class="axis" x1="0" y1="${mid}" x2="${w}" y2="${mid}"/>`
     + `<path d="${d}Z"/></svg>`;
   return wrap;
 }

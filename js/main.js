@@ -3,7 +3,7 @@
 import { state, EV, bus, totalDuration, clamp } from './state.js';
 import { importFiles, renderMediaList, appendAllToTimeline } from './media.js';
 import { loadDemoClip, demoCapabilities } from './demo.js';
-import { initTimeline, deleteSelected } from './timeline.js';
+import { initTimeline, deleteSelected, zoomTimeline } from './timeline.js';
 import { initInspector } from './inspector.js';
 import { initFoleyPanel } from './foley-panel.js';
 import { initEnginePanel } from './engine-panel.js';
@@ -14,6 +14,11 @@ import { saveProject, openProjectFile } from './project.js';
 import { toast, fmtTime } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
+
+/** Кадровый шаг в секундах — по нему ходят стрелки. */
+function frameRate() {
+  return Number(state.settings.fps) || 25;
+}
 
 let booted = false;
 function init() {
@@ -135,8 +140,20 @@ function init() {
     if (e.code === 'Space') { e.preventDefault(); player.toggle(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { if (deleteSelected()) e.preventDefault(); }
     else if (e.key.toLowerCase() === 's') doSplit();
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); player.seek(state.time - (e.shiftKey ? 5 : 1)); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); player.seek(state.time + (e.shiftKey ? 5 : 1)); }
+    // Стрелки идут ПО КАДРУ, а не по секунде: подгонка фоли делается кадр за кадром,
+    // и шаг в секунду промахивался мимо нужного кадра 25 раз.
+    else if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      player.seek(state.time - (e.shiftKey ? 1 : 1 / frameRate()));
+    }
+    else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      player.seek(state.time + (e.shiftKey ? 1 : 1 / frameRate()));
+    }
+    // Масштаб таймлайна с клавиатуры. Проверяем и code, и key: на русской
+    // раскладке e.key даёт 'к'/е', а e.code — KeyR/KeyT независимо от языка.
+    else if (e.code === 'KeyR' || e.key.toLowerCase() === 'r') { e.preventDefault(); zoomTimeline(1.25); }
+    else if (e.code === 'KeyT' || e.key.toLowerCase() === 't') { e.preventDefault(); zoomTimeline(0.8); }
     else if (e.key === 'Home') player.seek(0);
     else if (e.key === 'End') player.seek(totalDuration());
   });
