@@ -18,14 +18,16 @@ const MAX_ROWS = 150;
 
 export function initFoleyPanel() {
   const body = document.getElementById('foley-body');
+  /* Пока пользователь держит панель, её нельзя перестраивать: кнопка под
+     пальцем исчезнет из DOM, и браузер не отправит на неё click. */
   body.addEventListener('pointerdown', () => { suppressRender = true; });
-  window.addEventListener('pointerup', () => {
-    if (suppressRender) { suppressRender = false; render(); }
-  });
+  const endInteract = () => { suppressRender = false; };
+  window.addEventListener('pointerup', endInteract);
+  window.addEventListener('pointercancel', endInteract);
 
   bus.on(EV.FOLEY, () => { if (!suppressRender) render(); });
-  bus.on(EV.MEDIA, render);
-  bus.on(EV.CLIPS, render);
+  bus.on(EV.MEDIA, () => { if (!suppressRender) render(); });
+  bus.on(EV.CLIPS, () => { if (!suppressRender) render(); });
 
   document.getElementById('foley-close').addEventListener('click', () => {
     document.getElementById('foley-drawer').classList.add('hidden');

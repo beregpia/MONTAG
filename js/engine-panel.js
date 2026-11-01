@@ -32,8 +32,18 @@ let suppress = false;
 export function initEnginePanel() {
   const body = document.getElementById('engine-body');
   if (!body) return;
+
+  /* Пока пользователь держит панель, её нельзя перестраивать: кнопка под
+     пальцем исчезнет из DOM, и браузер не отправит на неё click — импорт
+     дорожек просто не открывался. Набранное в полях тоже сбросится. */
   body.addEventListener('pointerdown', () => { suppress = true; });
-  window.addEventListener('pointerup', () => { if (suppress) { suppress = false; render(); } });
+  const endInteract = () => {
+    if (!suppress) return;
+    suppress = false;
+    refreshReadouts();
+  };
+  window.addEventListener('pointerup', endInteract);
+  window.addEventListener('pointercancel', endInteract);
 
   document.getElementById('engine-close')?.addEventListener('click', () => {
     document.getElementById('engine-drawer')?.classList.add('hidden');
@@ -45,9 +55,19 @@ export function initEnginePanel() {
     input.value = '';
   });
 
-  bus.on(EV.MEDIA, render);
-  bus.on(EV.PLAY, render);
+  bus.on(EV.MEDIA, () => { if (!suppress) render(); });
+  bus.on(EV.PLAY, () => { if (!suppress) refreshReadouts(); });
+  bus.on(EV.TIME, () => { if (!suppress) refreshReadouts(); });
   render();
+}
+
+/** Обновляет только зависящие от playhead подписи — без перестройки панели. */
+function refreshReadouts() {
+  const node = document.getElementById('engine-readout');
+  if (!node) return;
+  const fps = Number(state.settings.fps) || 25;
+  node.textContent = `playhead: ${fmtTime(state.time || 0)}`
+    + ` · кадр ${Math.round((state.time || 0) * fps)} · fps ${state.settings.fps}`;
 }
 
 /* ---------- импорт и индексация дорожек ---------- */
@@ -346,7 +366,7 @@ function render() {
   body.append(el('div', { class: 'row' }, dl, catInput, strInput, durInput, addBtn));
   body.append(el('div', { class: 'row' }, detBtn,
     el('span', { class: 'muted small' }, 'детектор видит движение, а не «шаг» — категорию проверьте')));
-  body.append(el('div', { class: 'muted small' },
+  body.append(el('div', { class: 'muted small', id: 'engine-readout' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
 
   /* --- калибровка: пик движения против настоящего касания --- */

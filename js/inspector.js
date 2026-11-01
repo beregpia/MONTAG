@@ -8,13 +8,18 @@ let suppressRender = false; // пока пользователь тащит по
 
 export function initInspector() {
   const body = document.getElementById('inspector-body');
+  /* Пока пользователь держит панель, её нельзя перестраивать: кнопка под
+     пальцем исчезнет из DOM, и браузер не отправит на неё click.
+     Раньше здесь стоял вызов несуществующей supppressRenderSafe() —
+     из-за него на любое отпускание мыши во всём приложении летел
+     ReferenceError, а флаг suppressRender не снимался никогда. */
   body.addEventListener('pointerdown', () => { suppressRender = true; });
-  window.addEventListener('pointerup', () => {
-    if (supppressRenderSafe()) { suppressRender = false; render(); }
-  });
+  const endInteract = () => { suppressRender = false; };
+  window.addEventListener('pointerup', endInteract);
+  window.addEventListener('pointercancel', endInteract);
   bus.on(EV.SELECT, render);
   bus.on(EV.CLIPS, () => { if (!suppressRender) render(); });
-  bus.on(EV.MEDIA, render);
+  bus.on(EV.MEDIA, () => { if (!suppressRender) render(); });
   render();
 }
 
