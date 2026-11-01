@@ -15,13 +15,17 @@ import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents } from './foley-place.js';
 import { buildMarkerMidi } from './midi.js';
-import { analyzeVideo } from './vision.js';
+import { analyzeVideo, calibrateOffset } from './vision.js';
 import * as player from './player.js';
 
 /** @type {Array<{id,name,category,pass,minGap,status,index,error}>} */
 let tracks = [];
 /** @type {Array<{id,frame,time,category,strength,duration}>} */
 let events = [];
+/** ручные метки «здесь настоящее касание» — для калибровки смещения детектора */
+let calMarks = [];
+/** медианное смещение «касание − пик движения», с */
+let calOffset = 0;
 let result = null;
 let suppress = false;
 
@@ -269,6 +273,12 @@ function exportMidi() {
 }
 
 /* ---------- рендер ---------- */
+/** Смещение со знаком: +0.048 / −0.120 / 0.000 */
+function signed(v) {
+  const r = Math.abs(v) < 5e-4 ? 0 : v;
+  return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(3)}`;
+}
+
 function tc(t, fps) {
   const total = Math.max(0, Math.round(t * fps));
   const f = total % fps;
@@ -338,6 +348,50 @@ function render() {
     el('span', { class: 'muted small' }, 'детектор видит движение, а не «шаг» — категорию проверьте')));
   body.append(el('div', { class: 'muted small' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
+
+  /* --- калибровка: пик движения против настоящего касания --- */
+  if (events.length) {
+    const fps0 = Number(state.settings.fps) || 25;
+    const markBtn = el('button', { class: 'btn', id: 'engine-mark', title: 'Запомнить позицию playhead как настоящее касание' }, '◎ Касание здесь');
+    markBtn.addEventListener('click', () => {
+      calMarks.push({ time: Math.max(0, state.time || 0) });
+      calMarks.sort((a, b) => a.time - b.time);
+      toast(`Метка касания: ${fmtTime(state.time || 0)}`);
+      render();
+    });
+    const calBtn = el('button', { class: 'btn', id: 'engine-cal', title: 'Медианное смещение между метками касаний и найденными событиями' }, '⇔ Смещение');
+    calBtn.addEventListener('click', () => {
+      const r = calibrateOffset(calMarks, events, fps0);
+      if (!r.used) {
+        toast('Ни одной пары: поставьте playhead на настоящее касание и нажмите «Касание здесь»', { type: 'warn' });
+        return;
+      }
+      calOffset = r.offset;
+      toast(`Смещение ${signed(calOffset)} с по ${r.used} парам`);
+      render();
+    });
+    const applyBtn = el('button', { class: 'btn', id: 'engine-cal-apply', title: 'Сдвинуть все отмеченные события на вычисленное смещение' }, 'Применить');
+    applyBtn.disabled = !calMarks.length;
+    applyBtn.addEventListener('click', () => {
+      if (!calMarks.length) return;
+      for (const e of events) {
+        e.time = Math.max(0, e.time + calOffset);
+        e.frame = Math.round(e.time * fps0);
+      }
+      events.sort((a, b) => a.time - b.time);
+      toast(`События сдвинуты на ${signed(calOffset)} с`);
+      render();
+    });
+    const clearCalBtn = el('button', { class: 'btn ghost tiny danger', title: 'Удалить метки касаний' }, '✕');
+    clearCalBtn.addEventListener('click', () => { calMarks = []; calOffset = 0; render(); });
+
+    body.append(el('div', { class: 'row' }, markBtn, calBtn, applyBtn, clearCalBtn,
+      el('span', { class: 'muted small' },
+        calMarks.length ? `меток ${calMarks.length}, смещение ${signed(calOffset)} с` : 'меток нет')));
+    body.append(el('div', { class: 'muted small' },
+      'Детектор отмечает пик замаха, а не касание. Поставьте playhead на 2–3 настоящих касания, ',
+      'нажмите «Касание здесь», затем «⇔ Смещение» и «Применить».'));
+  }
 
   if (events.length) {
     const list = el('div', { class: 'mini-list' });

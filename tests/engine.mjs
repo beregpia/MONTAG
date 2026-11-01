@@ -187,3 +187,28 @@ test('indexTrack: читает настоящий WAV из фикстур', () =
     assert.ok(typeof e.id === 'string' && e.id.length > 0);
   }
 });
+
+/* ---------- панель «Движок»: калибровка смещения в интерфейсе ---------- */
+test('панель: калибровка «касание ↔ пик движения» подключена', () => {
+  const src = readFileSync(new URL('../js/engine-panel.js', import.meta.url), 'utf8');
+  assert.match(src, /import\s*\{[^}]*calibrateOffset[^}]*\}\s*from\s*'\.\/vision\.js'/,
+    'calibrateOffset должен быть импортирован из vision.js');
+  for (const id of ['engine-mark', 'engine-cal', 'engine-cal-apply']) {
+    assert.ok(src.includes(`id: '${id}'`), `в панели нет кнопки #${id}`);
+  }
+  // смещение применяется и к времени, и к кадру
+  assert.match(src, /e\.time = Math\.max\(0, e\.time \+ calOffset\)/);
+  assert.match(src, /e\.frame = Math\.round\(e\.time \* fps0\)/);
+});
+
+test('панель: без отмеченных событий калибровка не показывается', () => {
+  const src = readFileSync(new URL('../js/engine-panel.js', import.meta.url), 'utf8');
+  assert.match(src, /калибровка: пик движения[\s\S]{0,80}if \(events\.length\)/,
+    'блок калибровки должен быть под тем же условием, что и список событий');
+});
+
+test('панель: кнопка детектора движения на месте', () => {
+  const src = readFileSync(new URL('../js/engine-panel.js', import.meta.url), 'utf8');
+  assert.ok(src.includes("id: 'engine-detect'"), 'кнопка #engine-detect потерялась');
+  assert.match(src, /detBtn\.addEventListener\('click', detectMotionInClip\)/);
+});

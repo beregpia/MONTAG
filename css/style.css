@@ -82,6 +82,10 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   padding: 10px 16px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line);
+  /* панели-«ящики» стоят на top: 49px, а панель выше — иначе они
+     срезают нижний край кнопок верхней панели */
+  position: relative;
+  z-index: 60;
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo {
