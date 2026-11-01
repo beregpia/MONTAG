@@ -1,6 +1,6 @@
 /* ============ Таймлайн: клипы, перетаскивание, плейхед, зум ============ */
 
-import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, trackAudible } from './state.js';
+import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, setTrackVolume, trackAudible } from './state.js';
 import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
@@ -11,6 +11,13 @@ import * as bank from './audio-bank.js';
 let pps = 70; // пикселей на секунду
 const MIN_PPS = 16;
 const MAX_PPS = 240;
+
+/* Ширина левой колонки заголовков дорожек — как в NLE. Колонка прилипает к
+ * левому краю при прокрутке и НЕ накладывается на волформу: содержимое дорожки
+ * начинается после неё, поэтому все координаты внутри дорожек сдвинуты на
+ * GUTTER. Раньше подпись была абсолютным наложением поверх волформы и закрывала
+ * её первые ~130 px. */
+const GUTTER = 152;
 
 // Дорожки фоли развёрнуты по умолчанию, когда есть что показать: иначе
 // размещение выполнилось, а на таймлайне по-прежнему ничего не видно.
@@ -74,7 +81,8 @@ export function initTimeline() {
   /* --- скраб по линейке --- */
   const seekFromEvent = (e) => {
     const rect = rulerEl().getBoundingClientRect();
-    const t = (e.clientX - rect.left) / pps;
+    // колонка заголовков не является временем: время 0 начинается после неё
+    const t = (e.clientX - rect.left - GUTTER) / pps;
     player.seek(t);
   };
   rulerEl().addEventListener('pointerdown', (e) => {
@@ -146,9 +154,16 @@ function keepInView(t) {
 /** Текущий масштаб, px/с. Нужен тестам: якорь зума проверяется по времени. */
 export function timelinePps() { return pps; }
 
+/**
+ * Ширина колонки заголовков. Нужна тестам: клип лежит в координатах своей
+ * дорожки (от начала полосы), а playhead — в координатах всего таймлайна,
+ * и сравнивать их напрямую нельзя без этого сдвига.
+ */
+export function timelineGutter() { return GUTTER; }
+
 export function fitToWindow() {
   const total = totalDuration();
-  const w = timelineEl().clientWidth - 40;
+  const w = timelineEl().clientWidth - GUTTER - 40;
   if (total > 0 && w > 0) {
     pps = clamp(Math.round(w / total), MIN_PPS, MAX_PPS);
   }
@@ -167,7 +182,8 @@ function indexForX(x) {
   let index = layout.length;
   for (let i = 0; i < layout.length; i++) {
     const mid = (layout[i].start + layout[i].dur / 2) * pps;
-    if (x < mid) { index = i; break; }
+    // x измерен от левого края дорожки, включая колонку заголовков
+    if (x - GUTTER < mid) { index = i; break; }
   }
   return index;
 }
@@ -177,13 +193,15 @@ export function render() {
   const total = totalDuration();
   // автоподгонка: содержимое не должно быть шире окна, иначе «уезжает вправо»
   if (!userZoomed && total > 0) {
-    const w = timelineEl().clientWidth - 40;
+    // минус колонка заголовков: она занимает место окна, но не время
+    const w = timelineEl().clientWidth - GUTTER - 40;
     if (w > 0) pps = clamp(Math.round(w / total), MIN_PPS, MAX_PPS);
   }
-  const width = Math.max(total * pps + 40, timelineEl().clientWidth - 2);
+  const width = Math.max(total * pps + 40, timelineEl().clientWidth - GUTTER - 2);
 
-  rulerEl().style.width = `${width}px`;
-  trackEl().style.width = `${width}px`;
+  // строки шире содержимого ровно на колонку заголовков
+  rulerEl().style.width = `${GUTTER + width}px`;
+  trackEl().style.width = `${GUTTER + width}px`;
 
   renderRuler(total, width);
   renderTrack(layout);
@@ -198,28 +216,46 @@ export function render() {
 function renderRuler(total, width) {
   const ruler = rulerEl();
   ruler.textContent = '';
+  ruler.append(gutterEl('ruler'));
+  const body = el('div', { class: 'tl-body', style: `width:${width}px` });
+  ruler.append(body);
   const steps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
   let step = steps.find((s) => s * pps >= 70) || 300;
   // не даём линейке разрастись до тысяч узлов на длинных проектах
   while (total / step > 400) step *= 2;
   const upTo = Math.max(total, width / pps) + step;
   for (let t = 0; t <= upTo; t += step) {
-    ruler.append(
+    body.append(
       el('div', { class: 'ruler-tick major', style: `left:${t * pps}px` }),
       el('div', { class: 'ruler-label', style: `left:${t * pps + 4}px` }, fmtTime(t, false)),
     );
     for (let k = 1; k < 4; k++) {
       const minor = t + (step * k) / 4;
       if (minor * pps > width) break;
-      ruler.append(el('div', { class: 'ruler-tick', style: `left:${minor * pps}px` }));
+      body.append(el('div', { class: 'ruler-tick', style: `left:${minor * pps}px` }));
     }
   }
+}
+
+/** Пустая колонка заголовков над линейкой — чтобы время начиналось там же. */
+function gutterEl(kind) {
+  return el('div', { class: `tl-gutter tl-gutter-${kind}` });
 }
 
 function renderTrack(layout) {
   const track = trackEl();
   track.textContent = '';
   clearMarker();
+
+  // Колонка заголовка видеодорожки: имя клипа под playhead. Держит ту же
+  // ширину, что и у дорожек фоли, иначе время на дорожках разъедется.
+  const active = layout.find((it) => state.time >= it.start && state.time < it.end) || layout[0];
+  track.append(el('div', { class: 'tl-gutter tl-gutter-track' },
+    el('span', { class: 'tl-gutter-name', title: active?.clip?.name || '' },
+      active?.clip?.name || 'видео'),
+    el('span', { class: 'tl-gutter-tag' }, 'V1')));
+  const body = el('div', { class: 'tl-body', style: `width:${Math.max(0, layout.reduce((m, it) => Math.max(m, it.end * pps), 0))}px` });
+  track.append(body);
 
   layout.forEach((it, index) => {
     const clip = it.clip;
@@ -283,7 +319,7 @@ function renderTrack(layout) {
       clearMarker();
     });
 
-    track.append(node);
+    body.append(node);
   });
 }
 
@@ -354,10 +390,10 @@ function renderFoleyTrack(total, width) {
   for (const g of rowGroups(placed)) {
     const row = el('div', { class: 'foley-row' });
     if (!trackAudible(g.file)) row.classList.add('silent');
-    row.append(el('div', { class: 'foley-row-anchor' },
-      el('div', { class: 'foley-row-label', title: g.label }, g.label),
-      mixButtons(g.file)));
-    const lane = el('div', { class: 'foley-lane' });
+    // Колонка заголовка — настоящая, а не наложение: имя, мьют, соло и
+    // громкость живут в ней и не закрывают волформу.
+    row.append(trackHead(g.file, g.label, g.items.length));
+    const lane = el('div', { class: 'foley-lane', style: `width:${width}px` });
     for (const p of g.items) {
       if (p.time * pps > width) continue;
       lane.append(foleyClip(p));
@@ -432,10 +468,24 @@ function highlightPlayingClip(t) {
  * кадре времени, и render() сюда приводил бы к миганию и потере фокуса.
  * Смена идёт через шину MIX.
  */
-function mixButtons(file) {
-  const m = state.mix[file] || { mute: false, solo: false };
+/**
+ * Заголовок дорожки фоли — колонка слева, как в NLE: имя, мьют, соло,
+ * громкость. Прилипает к левому краю при прокрутке и не накладывается на
+ * волформу: содержимое дорожки начинается после колонки.
+ *
+ * Кнопки не вызывают render() сами: таймлайн перестраивается на каждом кадре
+ * времени, и render() сюда приводил бы к миганию и потере фокуса. Смена идёт
+ * через шину MIX.
+ */
+function trackHead(file, label, count) {
+  const m = state.mix[file] || { mute: false, solo: false, volume: 1 };
   const anySolo = Object.values(state.mix).some((x) => x.solo);
-  const wrap = el('div', { class: 'foley-mix' });
+  const head = el('div', { class: 'tl-gutter tl-gutter-foley' });
+
+  head.append(el('span', {
+    class: 'tl-gutter-name',
+    title: `${label} \u00b7 ${count} \u0434\u0443\u0431\u043b.`,
+  }, label));
 
   const mk = (key, letter, on, title) => {
     const b = el('button', {
@@ -446,17 +496,31 @@ function mixButtons(file) {
     }, letter);
     b.addEventListener('click', (ev) => {
       ev.stopPropagation();
-      const cur = state.mix[file] || { mute: false, solo: false };
+      const cur = state.mix[file] || { mute: false, solo: false, volume: 1 };
       if (key === 'mute') setTrackMute(file, !cur.mute);
       else setTrackSolo(file, !cur.solo);
     });
     return b;
   };
-
-  wrap.append(mk('mute', 'M', m.mute, 'Мьют: дорожка не звучит'));
-  wrap.append(mk('solo', 'S', m.solo && !m.mute,
+  head.append(mk('mute', 'M', m.mute, 'Мьют: дорожка не звучит'));
+  head.append(mk('solo', 'S', m.solo && !m.mute,
     anySolo ? 'Соло: звучат только помеченные дорожки' : 'Соло этой дорожки'));
-  return wrap;
+
+  // Громкость дорожки: своя, потому что шаги одного персонажа могут оказаться
+  // громче другого, а общая громкость фоли этого не разводит.
+  const vol = el('input', {
+    class: 'foley-vol',
+    type: 'range', min: '0', max: '1.5', step: '0.05',
+    value: String(m.volume ?? 1),
+    title: 'Громкость дорожки',
+    'data-file': file,
+  });
+  vol.addEventListener('input', () => setTrackVolume(file, Number(vol.value)));
+  // ползунок не должен уводить playhead: таймлайн слушает клики по дорожке
+  vol.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+  vol.addEventListener('click', (ev) => ev.stopPropagation());
+  head.append(vol);
+  return head;
 }
 
 /**
@@ -627,7 +691,8 @@ function waveformSvg(wave, w) {
 }
 
 function updatePlayhead(t) {
-  playheadEl().style.left = `${t * pps}px`;
+  // содержимое дорожек сдвинуто на колонку заголовков — playhead тоже
+  playheadEl().style.left = `${GUTTER + t * pps}px`;
   const total = totalDuration();
   const scrub = document.getElementById('scrub');
   scrub.value = total > 0 ? String(Math.round((t / total) * 1000)) : '0';

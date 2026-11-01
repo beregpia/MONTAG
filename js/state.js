@@ -188,8 +188,18 @@ export function dropSourceTrack(name) {
 export function setTrackMute(file, v) { setMix(file, 'mute', v); }
 export function setTrackSolo(file, v) { setMix(file, 'solo', v); }
 
+/**
+ * Громкость дорожки, 0..1.5. Своя на дорожку, а не одна общая: шаги одного
+ * персонажа могут оказаться громче другого, и общая громкость фоли их не разводит.
+ */
+export function setTrackVolume(file, v) {
+  const m = state.mix[file] || (state.mix[file] = { mute: false, solo: false, volume: 1 });
+  m.volume = clamp(Number(v) || 0, 0, 1.5);
+  bus.emit(EV.MIX);
+}
+
 function setMix(file, key, v) {
-  const m = state.mix[file] || (state.mix[file] = { mute: false, solo: false });
+  const m = state.mix[file] || (state.mix[file] = { mute: false, solo: false, volume: 1 });
   m[key] = !!v;
   bus.emit(EV.MIX);
 }

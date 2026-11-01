@@ -460,20 +460,55 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 }
 .foley-clip.review .foley-clip-label { color: #f0d9a8; }
 
-/* Мьют/соло дорожки. Колонка подписи — это .foley-row-anchor нулевой ширины
- * с абсолютной подписью внутри; если положить кнопки в поток, они получат
- * ноль места и окажутся невидимыми. Поэтому кнопки тоже абсолютные и стоят
- * правым продолжением подписи, у левого края строки. */
-.foley-mix {
-  position: absolute;
-  left: 98px; top: 0; bottom: 0;
-  display: flex; align-items: center; gap: 2px;
-  z-index: 4;
+/* ---- левая колонка заголовков дорожек, как в NLE ----
+ * Прилипает к левому краю при прокрутке и не накладывается на волноформу:
+ * содержимое дорожки начинается после неё, поэтому все координаты внутри
+ * дорожек сдвинуты на GUTTER (152 px). Раньше подпись была абсолютным
+ * наложением поверх волноформы и закрывала её первые ~130 px. */
+.tl-gutter {
+  flex: 0 0 152px;
+  width: 152px;
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 6px;
   background: #0d0f13;
-  border-right: 1px solid #191c23;
+  border-right: 1px solid var(--line);
+  box-sizing: border-box;
 }
+.tl-gutter-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tl-gutter-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: #4a5160;
+  border: 1px solid #23272f;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+/* высоту колонкам задаёт строка: flex-элемент растягивается по ней сам,
+ * поэтому явных height здесь нет — иначе колонка короче дорожки и видна
+ * щель между ними */
+/* у линейки и видеодорожки свою границу даёт сама строка — иначе она удваивается */
+.tl-gutter-foley { border-bottom: 1px solid #12151b; }
+.tl-body { position: relative; flex: 0 0 auto; min-width: 0; }
+.ruler, .track, .foley-row { display: flex; }
+.track { position: relative; }
+
+/* мьют, соло и громкость — внутри колонки заголовка */
 .foley-mix-btn {
-  width: 15px; height: 15px; padding: 0;
+  flex: 0 0 auto;
+  width: 16px; height: 16px; padding: 0;
   font-size: 9px; line-height: 1; font-weight: 700;
   color: #6f7787; background: #14171d;
   border: 1px solid #23272f; border-radius: 3px;
@@ -481,8 +516,15 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 }
 .foley-mix-btn:hover { color: #cdd4e0; border-color: #3a4150; }
 .foley-mix-btn.on { color: #0b0d11; background: var(--accent-2); border-color: var(--accent-2); }
-/* заглушённая дорожка видна, но потухшая — как в любой DAW */
-.foley-row.silent .foley-row-label { color: #4a5160; }
+.foley-vol {
+  flex: 0 0 44px;
+  width: 44px; height: 14px;
+  margin: 0;
+  accent-color: var(--accent-2);
+  cursor: pointer;
+}
+/* заглушенная дорожка видна, но потухшая — как в любой DAW */
+.foley-row.silent .tl-gutter-name { color: #4a5160; }
 .foley-row.silent .foley-wave path { fill: rgba(120, 132, 152, .25); stroke: #5b6472; }
 
 /* исходные дорожки: своя шкала, поэтому визуально отделены */

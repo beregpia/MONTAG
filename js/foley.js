@@ -172,7 +172,9 @@ export function tick(prevT, nowT) {
   for (const i of placementsInFrame(state.placements, prevT, nowT, fromStart)) {
     const p = state.placements[i];
     if (!trackAudible(p.file)) continue;   // мьют или чужое соло
-    bank.playCut(p.file, p.cutFrom, p.cutTo, when, { ctx, out, gain: state.foleyGain });
+    const vol = state.mix[p.file]?.volume ?? 1;
+    bank.playCut(p.file, p.cutFrom, p.cutTo, when,
+      { ctx, out, gain: state.foleyGain * vol });
   }
 }
 
