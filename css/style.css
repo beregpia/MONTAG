@@ -28,8 +28,16 @@ html, body {
 
 body {
   display: grid;
+  /* Колонка задана явно через minmax(0, 1fr). Без этого неявная
+   * grid-колонка растягивалась под самое широкое содержимое — а самое
+   * широкое это таймлайн при масштабе. Страница получала горизонтальную
+   * прокрутку, и вправо уезжали ВСЁ сразу — и картинка, и кнопки
+   * верхней панели. Вот откуда «улетает и не возвращается».
+   */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100vh;
+  overflow-x: hidden;
 }
 
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 600; }
@@ -266,6 +274,9 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   border-top: 1px solid var(--line);
   background: var(--bg-panel);
   padding: 8px 12px 12px;
+  /* min-width: 0 — чтобы широкое содержимое таймлайна не растягивало ряд */
+  min-width: 0;
+  overflow: hidden;
 }
 .timeline-toolbar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;

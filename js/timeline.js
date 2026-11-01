@@ -153,7 +153,8 @@ function keepInView(t) {
   const el0 = timelineEl();
   const viewW = el0.clientWidth;
   if (viewW <= 0) return;
-  const x = t * pps;
+  // та же координата, что у playhead: содержимое дорожек сдвинуто на колонку
+  const x = GUTTER + t * pps;
   const left = el0.scrollLeft;
   if (x < left + 40 || x > left + viewW - 40) {
     el0.scrollLeft = Math.max(0, Math.round(x - viewW / 2));
@@ -175,10 +176,13 @@ export function fitToWindow() {
   const total = totalDuration();
   const w = timelineEl().clientWidth - GUTTER - 40;
   if (total > 0 && w > 0) {
-    pps = clamp(Math.round(w / total), MIN_PPS, MAX_PPS);
+    pps = clamp(Math.floor(w / total), MIN_PPS, MAX_PPS);
   }
   userZoomed = false;
   render();
+  // «Весь проект» — это ещё и «вернись к началу». Без сброса прокрутки вид
+  // оставался там, куда его увел зум, и кнопка не возвращала картину.
+  timelineEl().scrollLeft = 0;
 }
 
 /** true, если проект сейчас виден целиком (зум не увеличен вручную). */
@@ -205,13 +209,20 @@ export function render() {
   if (!userZoomed && total > 0) {
     // минус колонка заголовков: она занимает место окна, но не время
     const w = timelineEl().clientWidth - GUTTER - 40;
-    if (w > 0) pps = clamp(Math.round(w / total), MIN_PPS, MAX_PPS);
+    // округляем ВНИЗ: при округлении вверх содержимое вылезало за окно
+    // на пару пикселей, и таймлайн получал лишнюю прокрутку — отсюда
+    // «улетает вправо и не возвращается».
+    if (w > 0) pps = clamp(Math.floor(w / total), MIN_PPS, MAX_PPS);
   }
   const width = Math.max(total * pps + 40, timelineEl().clientWidth - GUTTER - 2);
 
   // строки шире содержимого ровно на колонку заголовков
   rulerEl().style.width = `${GUTTER + width}px`;
   trackEl().style.width = `${GUTTER + width}px`;
+  // Когда содержимое помещается в окно, прокрутка бессмысленна — и именно она
+  // создавала эффект «улетело и не возвращается». Сбрасываем, иначе после
+  // зума вид оставался сдвинутым даже тогда, когда всё уже видно.
+  if (GUTTER + width <= timelineEl().clientWidth) timelineEl().scrollLeft = 0;
 
   renderRuler(total, width);
   renderTrack(layout);
@@ -356,7 +367,8 @@ function moveClipTo(clipId, targetIndex) {
 function renderFoleyTrack(total, width) {
   const strip = document.getElementById('foley-track');
   if (!strip) return;
-  strip.style.width = `${width}px`;
+  // та же ширина, что у линейки и видеодорожки: колонка заголовков + содержимое
+  strip.style.width = `${GUTTER + width}px`;
   strip.textContent = '';
   syncFoleyToggle();
   syncSrcToggle();

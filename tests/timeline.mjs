@@ -694,3 +694,62 @@ test('без размещения подпись диапазона не поя�
   timeline.render();
   assert.ok(!document.getElementById('foley-span'), 'нечего описывать');
 });
+
+/* ---------- зум должен возвращаться ---------- */
+// Пользователь трижды: «при масштабировании улетает вправо и не возвращается».
+// Кроме якоря зума нашлись три отдельных дефекта прокрутки.
+test('зум: «Весь проект» возвращает и масштаб, и вид', () => {
+  srcScene();
+  const tl = document.getElementById('timeline');
+  Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => 1270 });
+  timeline.fitToWindow();                       // подгонка уже при нужной ширине
+  const fitPps = timeline.timelinePps();
+
+  document.getElementById('zoom-in').click();
+  document.getElementById('zoom-in').click();
+  assert.ok(timeline.timelinePps() > fitPps, 'масштаб вырос');
+  tl.scrollLeft = 900;                       // вид увели вправо
+
+  document.getElementById('zoom-fit').click();
+  assert.equal(timeline.timelinePps(), fitPps, 'масштаб вернулся к подгонке');
+  assert.equal(tl.scrollLeft, 0,
+    'и вид вернулся к началу — иначе кнопка не возвращает картину');
+});
+
+test('зум: когда содержимое помещается в окно, прокрутка сбрасывается', () => {
+  srcScene();
+  const tl = document.getElementById('timeline');
+  Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => 1270 });
+  timeline.fitToWindow();
+  tl.scrollLeft = 400;
+  timeline.render();
+  assert.equal(tl.scrollLeft, 0,
+    'прокручивать нечего — сдвиг только мешает');
+});
+
+test('полоса фоли той же ширины, что и линейка', () => {
+  srcScene();
+  state.setPlacements([
+    { id: 'z1', time: 12.5, duration: 0.3, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.3, category: 'steps' },
+  ]);
+  timeline.render();
+  assert.equal(document.getElementById('foley-track').style.width,
+    document.getElementById('ruler').style.width,
+    'колонка заголовков + содержимое: иначе дорожки фоли короче линейки');
+});
+
+test('keepInView считает playhead с учётом колонки заголовков', () => {
+  srcScene();
+  const tl = document.getElementById('timeline');
+  Object.defineProperty(tl, 'clientWidth', { configurable: true, get: () => 800 });
+  timeline.fitToWindow();
+  document.getElementById('zoom-in').click();
+  document.getElementById('zoom-in').click();
+  const pps = timeline.timelinePps();
+  state.state.playing = true;
+  state.bus.emit(state.EV.TIME, 40);
+  const phX = timeline.timelineGutter() + 40 * pps;
+  assert.ok(phX >= tl.scrollLeft && phX <= tl.scrollLeft + 800,
+    `playhead должен быть виден: scrollLeft=${tl.scrollLeft}, playhead=${phX}`);
+  state.state.playing = false;
+});
