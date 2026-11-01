@@ -177,6 +177,14 @@ async function detectMotionInClip() {
   if (!clip) { toast('Сначала добавьте видео на таймлайн', { type: 'error' }); return; }
   const video = player.videoFor(clip);
   if (!video || !video.src) { toast('Видео клипа ещё не загрузилось', { type: 'error' }); return; }
+  // Без этой проверки разбор честно вернёт ноль событий, но совет будет
+  // «поднимите чувствительность» — и монтажёр пойдёт искать настройку,
+  // которой нет, вместо того чтобы просто дождаться кадра.
+  if (!isFinite(video.duration) || video.readyState < 2) {
+    toast('Кадр ещё не декодировался. Нажмите «Пуск», дождитесь картинки, '
+      + 'затем «🔍 Найти движение»', { type: 'warn', timeout: 9000 });
+    return;
+  }
 
   const catInput = document.getElementById('engine-cat');
   const category = (catInput?.value || '').trim() || 'steps';

@@ -12,6 +12,7 @@ const { check, done } = reporter();
 const BASE = new URL('../js/', import.meta.url);
 const state = await import(new URL('state.js', BASE).href);
 const panel = await import(new URL('engine-panel.js', BASE).href);
+const vision = await import(new URL('vision.js', BASE).href);
 
 panel.initEnginePanel();
 
@@ -179,5 +180,17 @@ check('дорожка без размещений не попадает в ис�
 check('дорожка размещения, которой нет в панели, всё равно попадает в источники',
   panel.premierePayload([plPlaced[0]], [], 'D:\\F', 25).sources.length === 1,
   'иначе клип остался бы без файла');
+
+/* ---------- детектор: не декодированное видео ---------- */
+// браузерное видео до загрузки имеет duration NaN и readyState 0. Разбор на
+// таком видео честно вернёт ноль событий, но совет «поднимите
+// чувствительность» увело бы монтажёра искать несуществующую настройку.
+check('анализ недогруженного видео даёт ноль событий, а не мусор',
+  (await vision.analyzeVideo({ duration: NaN, readyState: 0, src: 'x' }, { fps: 25 })).events.length === 0);
+
+state.state.clips.length = 0;
+state.state.clips.push({ id: 'c9', mediaId: 'm9', in: 0, out: 5, transitionIn: 'none', volume: 1, name: 'v.mp4' });
+panel.initEnginePanel();
+check('недогруженное видео не роняет панель', !!document.getElementById('engine-detect'));
 
 process.exitCode = done('Панель «Движок»') ? 0 : 1;
