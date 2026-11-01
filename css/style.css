@@ -446,6 +446,9 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .mini-table th { text-align: left; color: #9aa4b2; font-weight: 500; padding: 4px 6px; border-bottom: 1px solid #262c38; white-space: nowrap; }
 .mini-table td { padding: 4px 6px; border-bottom: 1px solid #1b2029; white-space: nowrap; }
 .mini-table tr:hover td { background: #151a23; }
+/* строка размещения, которая звучит прямо сейчас в предпросмотре */
+.mini-table tr.preview-now td { background: var(--accent-soft); color: var(--text); }
+.mini-table tr.preview-now td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 .mini-list { max-height: 220px; overflow: auto; border: 1px solid #262c38; border-radius: 8px; }
 .mini-row { display: flex; gap: 10px; align-items: center; padding: 4px 8px; font-size: 12px; border-bottom: 1px solid #1b2029; }
 .mini-row:last-child { border-bottom: none; }

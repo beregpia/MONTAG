@@ -41,15 +41,19 @@ const css = readFileSync(join(ROOT, 'css', 'style.css'), 'utf8');
 let html = readFileSync(join(ROOT, 'index.html'), 'utf8');
 
 // CSS inline вместо ссылки
+// Замена — функцией, а не строкой: в минифицированном коде встречаются
+// последовательности $`, $', $& — String.replace трактовал бы их как ссылки
+// на части исходной строки и вставлял куски index.html (вместе с исходным
+// тегом <script type="module" src="js/main.js">) в середину бандла.
 html = html.replace(
   /<link rel="stylesheet" href="css\/style\.css">/,
-  `<style>\n${css}\n</style>`,
+  () => `<style>\n${css}\n</style>`,
 );
 
 // Скрипт inline вместо модуля. </script> внутри строк исключаем escape'ом.
 html = html.replace(
   /<script type="module" src="js\/main\.js"><\/script>/,
-  `<script>\n${js.replace(/<\/script>/gi, '<\\/script>')}\n</script>`,
+  () => `<script>\n${js.replace(/<\/script>/gi, '<\\/script>')}\n</script>`,
 );
 
 if (html.includes('js/main.js') || html.includes('css/style.css')) {

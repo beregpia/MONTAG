@@ -93,4 +93,29 @@ state.state.settings.fps = 25;
 check('кадр считается от текущей частоты', Math.round(2 * 25) === 50);
 state.state.settings.fps = fpsBefore;
 
+/* ---------- предпросмотр: что звучит в каждом кадре ---------- */
+/* дельта кадра в приложении ~1/25 с, поэтому и в тестах так же */
+const FR = 1 / 25;
+const ps = [{ time: 1.0 }, { time: 2.0 }, { time: 3.0 }, { time: 4.0 }];
+
+check('за кадр звучит только пересечённый дубль',
+  panel.placementsInFrame(ps, 2 - FR, 2).join() === '1');
+check('дубль ровно на границе кадра звучит',
+  panel.placementsInFrame(ps, 1.0 - FR, 1.0).join() === '0');
+check('дубль в начале кадра не считается дважды',
+  panel.placementsInFrame(ps, 2, 2 + FR).length === 0);
+check('два дубля внутри одного кадра звучат оба',
+  panel.placementsInFrame([{ time: 2.0 }, { time: 2.02 }, { time: 5 }], 2 - FR, 2 + FR).join() === '0,1');
+check('уже звучавший дубль не повторяется',
+  panel.placementsInFrame(ps, 2 - FR, 2, new Set([1])).length === 0);
+check('перескок playhead не сыгрывает всё подряд',
+  panel.placementsInFrame(ps, 0.5, 30).length === 0);
+check('обратный перескок тоже не сыгрывает',
+  panel.placementsInFrame(ps, 30, 0.5).length === 0);
+check('строка «звучит сейчас» — последнее прошедшее размещение',
+  panel.currentPreviewRow(ps, 2.5) === 1 && panel.currentPreviewRow(ps, 0.5) === -1
+  && panel.currentPreviewRow(ps, 99) === 3);
+check('до первого дубля подсвечивать нечего', panel.currentPreviewRow(ps, 0.1) === -1);
+check('пустое размещение не ломает подсветку', panel.currentPreviewRow([], 5) === -1);
+
 process.exitCode = done('Панель «Движок»') ? 0 : 1;

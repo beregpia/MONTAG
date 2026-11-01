@@ -26,6 +26,13 @@ let events = [];
 let calMarks = [];
 /** медианное смещение «касание − пик движения», с */
 let calOffset = 0;
+/** моно дорожки длиннее этого не держим в памяти — предпросмотр будет недоступен */
+const PREVIEW_MAX_SAMPLES = 48000 * 20 * 60;   // 20 минут
+/** предпросмотр размещения: играем картинку и вставляем звук из дорожек */
+let previewing = false;
+let previewDone = null;   // Set уже звучавших размещений
+let previewRow = -1;      // какая строка таблицы звучит сейчас
+let lastPreviewT = 0;
 let result = null;
 let suppress = false;
 
@@ -57,7 +64,8 @@ export function initEnginePanel() {
 
   bus.on(EV.MEDIA, () => { if (!suppress) render(); });
   bus.on(EV.PLAY, () => { if (!suppress) refreshReadouts(); });
-  bus.on(EV.TIME, () => { if (!suppress) refreshReadouts(); });
+  bus.on(EV.TIME, (t) => { if (!suppress) refreshReadouts(); previewTick(t); });
+  bus.on(EV.PLAY, (on) => { if (!on && previewing) stopPreview(); });
   render();
 }
 
@@ -94,7 +102,13 @@ async function importTracks(fileList) {
       const mono = mixToMono(chans, buf.length);
       const idx = indexTrack(mono, buf.sampleRate, { category, pass, minGap: gapFor(f.name) });
       const t = tracks.find((x) => x.id === id);
-      if (t) { t.status = 'done'; t.index = idx; }
+      if (t) {
+        t.status = 'done';
+        t.index = idx;
+        // моно дорожки держим, чтобы можно было прослушать размещение:
+        // звук режется из той же позиции, куда встаёт на картинке
+        t.buffer = mono.length <= PREVIEW_MAX_SAMPLES ? { data: mono, sampleRate: buf.sampleRate } : null;
+      }
     } catch (err) {
       const t = tracks.find((x) => x.id === id);
       if (t) { t.status = 'error'; t.error = err.message || String(err); }
@@ -221,6 +235,111 @@ async function detectMotionInClip() {
     if (btn) btn.textContent = label;
     render();
   }
+}
+
+/* ---------- предпросмотр размещения ---------- */
+
+/** Играет вырезанный дубль из дорожки в момент, когда он встаёт на картинке. */
+function playCut(p, when) {
+  if (!p.audio) return;
+  const trk = tracks.find((t) => t.name === (p.audio.file || p.source));
+  if (!trk?.buffer) return;
+  const ctx = player.audioContext();
+  const out = player.getMasterGain?.();
+  if (!ctx || !out) return;
+  const { data, sampleRate } = trk.buffer;
+  const from = Math.max(0, Math.round((p.audio.cutFrom || 0) * sampleRate));
+  const to = Math.min(data.length, Math.round((p.audio.cutTo || 0) * sampleRate));
+  const len = to - from;
+  if (len <= 0) return;
+  const buf = ctx.createBuffer(1, len, sampleRate);
+  buf.copyToChannel(data.subarray(from, to), 0);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const g = ctx.createGain();
+  g.gain.value = 1;
+  src.connect(g);
+  g.connect(out);
+  try { src.start(when); } catch { /* уже остановилось */ }
+  src.onended = () => { try { g.disconnect(); } catch { /* ignore */ } };
+}
+
+/** Индексы размещений, чьё время перешёл playhead между кадрами. */
+export function placementsInFrame(placements, prevT, nowT, done = new Set()) {
+  if (!placements?.length || !(nowT > prevT) || nowT - prevT > 0.5) return [];
+  const out = [];
+  for (let i = 0; i < placements.length; i++) {
+    const t = placements[i].time;
+    if (t > prevT && t <= nowT && !done.has(i)) out.push(i);
+  }
+  return out;
+}
+
+/** Индекс строки, которая звучит прямо сейчас (последнее прошедшее размещение). */
+export function currentPreviewRow(placements, nowT) {
+  if (!placements?.length) return -1;
+  let cur = -1;
+  for (let i = 0; i < placements.length; i++) if (placements[i].time <= nowT + 1e-6) cur = i;
+  return cur;
+}
+
+/** Покадрово: пуляет дубли, чьё время перешёл playhead, и подсвечивает строку. */
+function previewTick(nowT) {
+  if (!previewing || !result?.placements.length) return;
+  const prev = lastPreviewT;
+  lastPreviewT = nowT;
+  if (!(nowT > prev) || nowT - prev > 0.5) return;   // перескок — не сыграть всё подряд
+  const ctx = player.audioContext();
+  if (!ctx) return;
+  const when = ctx.currentTime + 0.02;
+  for (const i of placementsInFrame(result.placements, prev, nowT, previewDone)) {
+    previewDone.add(i);
+    playCut(result.placements[i], when);
+  }
+  const current = currentPreviewRow(result.placements, nowT);
+  if (current !== previewRow) {
+    previewRow = current;
+    highlightPreviewRow();
+  }
+  const last = result.placements[result.placements.length - 1].time;
+  // render() уничтожает узлы панели — из кадра анимации его звать нельзя,
+  // иначе обработчики событий могут потерять свои кнопки на середине клика.
+  if (nowT >= last + 0.6) { stopPreview(false); queueMicrotask(render); }
+}
+
+/** Подсветка строки, которая звучит прямо сейчас. */
+function highlightPreviewRow() {
+  const rows = document.querySelectorAll('#engine-results tr[data-row]');
+  rows.forEach((tr) => {
+    const on = Number(tr.dataset.row) === previewRow;
+    tr.classList.toggle('preview-now', on);
+    if (on) tr.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function startPreview() {
+  if (!result?.placements.length) return;
+  const ps = result.placements;
+  const first = ps[0].time;
+  const last = ps[ps.length - 1].time;
+  previewing = true;
+  previewDone = new Set();
+  previewRow = -1;
+  // если playhead уже за последним дублем — начнём сначала
+  if (state.time > last || state.time < first - 0.5) player.seek(Math.max(0, first - 0.4));
+  lastPreviewT = state.time;
+  player.ensureAudio?.();
+  player.play();
+  render();
+}
+
+/** @param {boolean} updateUi false — когда зовём из кадра анимации. */
+function stopPreview(updateUi = true) {
+  previewing = false;
+  previewDone = null;
+  previewRow = -1;
+  player.pause();
+  if (updateUi) render();
 }
 
 /* ---------- размещение ---------- */
@@ -557,17 +676,29 @@ function render() {
   body.append(el('h3', {}, '3. Размещение'));
   const runBtn = el('button', { class: 'btn primary', id: 'engine-run' }, '▶ Разместить');
   runBtn.addEventListener('click', runPlacement);
-  body.append(runBtn);
+  const prevBtn = el('button', {
+    class: 'btn', id: 'engine-preview',
+    title: 'Играет картинка, и в моменты размещения звучит вырезанный дубль из вашей дорожки',
+  }, previewing ? '⏸ Стоп' : '🔊 Прослушать');
+  prevBtn.disabled = !result?.placements.length;
+  prevBtn.addEventListener('click', () => (previewing ? stopPreview() : startPreview()));
+  body.append(el('div', { class: 'row' }, runBtn, prevBtn));
+  if (result?.placements.length) {
+    body.append(el('div', { class: 'muted small' },
+      'Нажмите «Прослушать»: playhead идёт по таймлайну, и в момент каждого размещения ',
+      'звучит дубль, вырезанный из вашей дорожки. В таблице ниже подсвечивается строка, ',
+      'которая звучит сейчас.'));
+  }
 
   if (result) {
     const s = result.summary;
     body.append(el('p', {}, `Размещено ${s.placed} из ${s.total}` + (s.missing ? `, без дублей: ${s.missing}` : '')));
-    const table = el('table', { class: 'mini-table' });
+    const table = el('table', { class: 'mini-table', id: 'engine-results' });
     table.append(el('tr', {}, el('th', {}, 'таймкод'), el('th', {}, 'категория'), el('th', {}, 'дорожка'),
       el('th', {}, 'взять из'), el('th', {}, 'вырез'), el('th', {}, 'увер.'), el('th', {}, '')));
-    for (const p of result.placements) {
+    result.placements.forEach((p, i) => {
       const note = p.audio ? (p.review ? 'проверить' : '') : (p.note || 'нет дубля');
-      table.append(el('tr', {},
+      table.append(el('tr', { dataset: { row: String(i) } },
         el('td', { class: 'mono' }, tc(p.time, state.settings.fps || 25)),
         el('td', {}, p.category),
         el('td', {}, p.audio ? p.audio.track : '—'),
@@ -575,7 +706,7 @@ function render() {
         el('td', {}, p.audio ? `${p.audio.cutFrom.toFixed(2)}–${p.audio.cutTo.toFixed(2)}` : '—'),
         el('td', {}, p.audio ? p.audio.confidence.toFixed(2) : '—'),
         el('td', { class: note ? 'warn' : '' }, note)));
-    }
+    });
     body.append(table);
 
     for (const [c, v] of Object.entries(s.byCategory)) {
