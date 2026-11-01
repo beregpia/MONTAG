@@ -363,7 +363,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   position: relative;
   display: flex;
   align-items: stretch;
-  height: 22px;
+  height: 34px;
   border-top: 1px solid #191c23;
 }
 .foley-row:first-child { border-top: 0; }
@@ -384,7 +384,7 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   width: 132px;
   padding: 0 8px 0 6px;
   font-size: 10px;
-  line-height: 21px;
+  line-height: 33px;
   color: var(--muted);
   white-space: nowrap;
   overflow: hidden;
@@ -417,30 +417,35 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .foley-clip {
   position: absolute;
   top: 3px;
-  height: 16px;
+  height: 28px;
   border-radius: 4px;
-  background: linear-gradient(180deg, #23304a, #18202f);
+  background: linear-gradient(180deg, #1b2740, #121a29);
   border: 1px solid #3d567c;
   cursor: pointer;
   overflow: hidden;
 }
 .foley-clip:hover { border-color: var(--accent-2); }
-.foley-clip.review { border-color: #7a5a2a; background: linear-gradient(180deg, #2e2617, #211b12); }
+.foley-clip.review { border-color: #7a5a2a; background: linear-gradient(180deg, #2a2216, #1b1610); }
+/* Волформа занимает клип целиком, кроме полосы подписи: её надо видеть,
+   иначе о длине и силе дубля судить нечем. */
 .foley-wave {
-  position: absolute; inset: 1px 1px auto;
-  height: 8px;
-  opacity: .85;
+  position: absolute;
+  left: 1px; right: 1px; top: 1px; bottom: 11px;
+  opacity: .95;
 }
 .foley-wave svg { display: block; width: 100%; height: 100%; }
 .foley-wave path {
-  fill: none;
-  stroke: #7fb0ff;
-  stroke-width: 1;
+  fill: rgba(127, 176, 255, .55);
+  stroke: #9cc4ff;
+  stroke-width: .5;
   vector-effect: non-scaling-stroke;
 }
-.foley-clip.review .foley-wave path { stroke: #e0b264; }
+.foley-clip.review .foley-wave path {
+  fill: rgba(224, 178, 100, .5);
+  stroke: #f0c879;
+}
 .foley-clip-label {
-  position: absolute; left: 3px; right: 3px; bottom: 0;
+  position: absolute; left: 3px; right: 3px; bottom: 1px;
   font-size: 9px; line-height: 9px;
   color: #cfe0ff;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;

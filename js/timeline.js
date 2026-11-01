@@ -399,7 +399,10 @@ function foleyClip(p) {
       + `\nдубль из ${fmtTime(p.cutFrom)}…${fmtTime(p.cutTo)} дорожки`
       + (p.review ? '\nнизкая уверенность — стоит проверить' : ''),
   });
-  const wave = bank.waveform(p.file, 40, p.cutFrom, p.cutTo);
+  // точек вдвое больше, чем пикселей: иначе на широком клипе волформа
+  // превращается в треугольник
+  const points = Math.max(24, Math.min(200, Math.round(w * 2)));
+  const wave = bank.waveform(p.file, points, p.cutFrom, p.cutTo);
   if (wave && w >= 10) clip.append(waveformSvg(wave, w));
   clip.append(el('span', { class: 'foley-clip-label' }, p.category || 'звук'));
   clip.addEventListener('click', (e) => {
@@ -410,20 +413,27 @@ function foleyClip(p) {
   return clip;
 }
 
-/** Мини-волформа как SVG — дешевле, чем canvas на каждый клип. */
+/**
+ * Мини-волформа клипа: зеркальная залитая фигура, как в NLE.
+ * Одна половина сверху выглядела бы графиком, а не звуком — по нему не понять,
+ * где пик и где полка.
+ */
 function waveformSvg(wave, w) {
-  const h = 14;
+  const h = 100;                 // в безразмерных единицах viewBox
   const mid = h / 2;
   const step = w / Math.max(1, wave.length - 1);
   let d = '';
   for (let i = 0; i < wave.length; i++) {
-    const x = (i * step).toFixed(1);
-    const y = (mid - wave[i] * (mid - 1)).toFixed(1);
-    d += `${i ? 'L' : 'M'}${x} ${y}`;
+    const x = (i * step).toFixed(2);
+    d += `${i ? 'L' : 'M'}${x} ${(mid - wave[i] * (mid - 2)).toFixed(2)}`;
+  }
+  for (let i = wave.length - 1; i >= 0; i--) {
+    const x = (i * step).toFixed(2);
+    d += `L${x} ${(mid + wave[i] * (mid - 2)).toFixed(2)}`;
   }
   const wrap = el('div', { class: 'foley-wave' });
   wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
-    + `<path d="${d}"/></svg>`;
+    + `<path d="${d}Z"/></svg>`;
   return wrap;
 }
 

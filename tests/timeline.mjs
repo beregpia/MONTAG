@@ -249,3 +249,44 @@ test('выравнивание: клип стоит под тем же врем�
   assert.equal(lane.getBoundingClientRect().left - row.getBoundingClientRect().left, 0,
     'полоса клипов начинается там же, где и ряд');
 });
+
+const bank = await import(new URL('../js/audio-bank.js', import.meta.url).href);
+
+test('волформа клипа зеркальная и заполненная', () => {
+  const data = new Float32Array(4000);
+  for (let i = 0; i < 2000; i++) data[i] = 0.9;   // громко
+  for (let i = 2000; i < 4000; i++) data[i] = 0.1; // тихо
+  bank.putTrack('wf.wav', { data, sampleRate: 1000 });
+  state.setPlacements([
+    { id: 'w1', time: 1, duration: 2, file: 'wf.wav', cutFrom: 0, cutTo: 2, category: 'steps' },
+  ]);
+  timeline.render();
+  const wave = document.querySelector('#foley-track .foley-wave svg path');
+  assert.ok(wave, 'волформа нарисована');
+  const d = wave.getAttribute('d');
+  assert.ok(d.endsWith('Z'), 'фигура замкнута — заливается, а не просто штрихуется');
+  // путь должен уходить и вверх, и вниз от середины: иначе это график, не звук
+  const ys = [...d.matchAll(/[ML]([\d.]+) ([\d.]+)/g)].map((m) => Number(m[2]));
+  assert.ok(Math.min(...ys) < 50 && Math.max(...ys) > 50,
+    'волформа должна быть зеркальной относительно середины');
+  // ширина клипа задаёт плотность точек: на широком клипе их больше
+  assert.ok(ys.length >= 24, `точек ${ys.length}`);
+  bank.clearBank();
+});
+
+test('ширина клипа задаёт плотность волформы', () => {
+  const data = new Float32Array(10000).fill(0.5);
+  bank.putTrack('wf2.wav', { data, sampleRate: 1000 });
+  const count = (dur) => {
+    state.setPlacements([
+      { id: `q${dur}`, time: 0, duration: dur, file: 'wf2.wav', cutFrom: 0, cutTo: dur, category: 'steps' },
+    ]);
+    timeline.render();
+    const d = document.querySelector('#foley-track .foley-wave svg path')?.getAttribute('d') || '';
+    return [...d.matchAll(/[ML]/g)].length;
+  };
+  const narrow = count(0.1);
+  const wide = count(4);
+  assert.ok(wide > narrow, `широкий клип должен иметь больше точек: ${narrow} -> ${wide}`);
+  bank.clearBank();
+});
