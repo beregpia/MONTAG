@@ -207,3 +207,223 @@ test('чувствительность управляет порогом в об
   const high = detectMotionEvents(res.curve, res.times, { sensitivity: 1.5 }).length;
   assert.ok(low > high, `ниже порог — больше событий: ${low} против ${high}`);
 });
+
+/* ---------- сигнал движения: камера, разбавление, края ---------- */
+// Прежняя кривая — среднее разницы по ВСЕМ клеткам. Она разбавляла мелкий
+// объект (стопа = 8 клеток из 576) и росла на тряске камеры, которая двигает
+// весь кадр. Замер: ровно 40 шагов из 40 новая кривая даёт в 16 конфигурациях
+// из 16, старая — лишь в 9 из 16 (диапазон 23…43).
+
+/** Неоднородный фон с мелкими деталями — чтобы были и яркость, и края. */
+function field() {
+  const g = new Float32Array(GW * GH);
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) {
+      g[y * GW + x] = 60 + 50 * Math.sin(x * 0.9 + y * 0.7)
+        + 30 * Math.sin(x * 2.3 - y * 1.1) + ((x * 7 + y * 13) % 5) * 4;
+    }
+  }
+  return g;
+}
+
+/** Точный перенос кадра на целое число клеток — панорама камеры. */
+function rolled(g, dx, dy) {
+  const o = new Float32Array(g.length);
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) {
+      const sx = (((x - dx) % GW) + GW) % GW;
+      const sy = (((y - dy) % GH) + GH) % GH;
+      o[y * GW + x] = g[Math.round(sy) * GW + Math.round(sx)];
+    }
+  }
+  return o;
+}
+
+/** Сдвиг с пересэмплингом — модель тряски с субклеточной точностью. */
+function resampled(g, dx, dy) {
+  const o = new Float32Array(g.length);
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < GW; x++) {
+      const sx = x - dx; const sy = y - dy;
+      let s = 0;
+      for (let ky = 0; ky < 2; ky++) {
+        for (let kx = 0; kx < 2; kx++) {
+          const px = Math.floor(sx) + kx; const py = Math.floor(sy) + ky;
+          if (px < 0 || px >= GW || py < 0 || py >= GH) continue;
+          const wx = sx - Math.floor(sx); const wy = sy - Math.floor(sy);
+          s += g[py * GW + px] * ((kx ? wx : 1 - wx) * (ky ? wy : 1 - wy));
+        }
+      }
+      o[y * GW + x] = s;
+    }
+  }
+  return o;
+}
+
+/**
+ * Сцена с каденцией шагов 0.6 с: 240 кадров, 12 fps → 40 шагов.
+ * @param {number} cells ширина объекта в клетках
+ * @param {number} amp   амплитуда объекта
+ * @param {number} shake амплитуда тряски камеры в клетках
+ */
+function walkScene(cells, amp, shake) {
+  const base = field();
+  const frames = [];
+  for (let i = 0; i < 240; i++) {
+    const t = i / 12;
+    const m = t % 0.6;
+    const g = resampled(base, shake * Math.sin(t * 2.1), shake * 0.7 * Math.cos(t * 1.7));
+    const step = m < 0.18 ? Math.exp(-Math.pow(m - 0.09, 2) / 0.004) : 0;
+    for (let y = 8; y < 12; y++) for (let x = 6; x < 6 + cells; x++) g[y * GW + x] = base[y * GW + x] + amp * step;
+    frames.push(g);
+  }
+  return frames;
+}
+
+/** События по кривой. */
+function eventsOn(curve, fps) {
+  const times = new Float32Array(curve.length);
+  for (let i = 0; i < times.length; i++) times[i] = (i + 0.5) / fps;
+  return V.detectMotionEvents(curve, times);
+}
+
+/** Прежняя кривая: среднее разницы соседних кадров по ВСЕМ клеткам. */
+function oldCurve(frames) {
+  const diffs = [];
+  for (let f = 1; f < frames.length; f++) diffs.push(V.cellDiff(frames[f - 1], frames[f]));
+  return V.motionCurve(diffs);
+}
+
+test('motionSignal: статика даёт ноль', () => {
+  const base = field();
+  const frames = Array.from({ length: 60 }, () => Float32Array.from(base));
+  const sig = V.motionSignal(frames);
+  assert.equal(Math.max(...sig.score), 0, 'на статике сигнал должен быть нулевым');
+});
+
+test('motionSignal: панорама камеры не даёт ложных событий', () => {
+  const base = field();
+  const pan = [];
+  for (let i = 0; i < 240; i++) {
+    const t = i / 12;
+    pan.push(rolled(base, 2 * Math.sin(t * 2.1), Math.round(1.4 * Math.cos(t * 1.7))));
+  }
+  assert.equal(eventsOn(V.motionSignal(pan).score, 12).length, 0,
+    'точный перенос кадра — это камера, а не движение в кадре');
+  assert.equal(eventsOn(oldCurve(pan), 12).length, 0, 'и прежняя кривая это умела');
+});
+
+test('motionSignal: мелкий объект при тряске находится целиком', () => {
+  // Худший случай прежней кривой: объект 3 клетки, амплитуда 40, тряска —
+  // находилось 23 шага из 40, больше половины терялось.
+  const frames = walkScene(3, 40, 0.35);
+  const ev = eventsOn(V.motionSignal(frames).score, 12);
+  assert.equal(ev.length, 40, `нашлось ${ev.length} шагов из 40`);
+});
+
+test('motionSignal: полный набор конфигураций даёт все шаги', () => {
+  for (const cells of [3, 8, 20, 60]) {
+    for (const amp of [40, 120]) {
+      for (const shake of [0, 0.35]) {
+        const ev = eventsOn(V.motionSignal(walkScene(cells, amp, shake)).score, 12);
+        assert.equal(ev.length, 40,
+          `клеток=${cells} амплитуда=${amp} тряска=${shake}: найдено ${ev.length} из 40`);
+      }
+    }
+  }
+});
+
+test('motionSignal: прежняя кривая теряла шаги там, где новая находит все', () => {
+  // Не «новая лучше», а конкретный замер: старая кривая в этих конфигурациях
+  // даёт не 40. Иначе тест выше ничего не защищает.
+  const lost = [];
+  for (const cells of [3, 8, 20, 60]) {
+    for (const amp of [40, 120]) {
+      for (const shake of [0, 0.35]) {
+        if (eventsOn(oldCurve(walkScene(cells, amp, shake)), 12).length !== 40) {
+          lost.push(`клеток=${cells} амплитуда=${amp} тряска=${shake}`);
+        }
+      }
+    }
+  }
+  assert.ok(lost.length >= 3,
+    `прежняя кривая должна была ошибаться хотя бы в трёх конфигурациях, список: ${lost.join('; ')}`);
+});
+
+test('motionSignal: канал краёв видит то, чего не видит яркость', () => {
+  // Ровная яркость в обоих кадрах — разница яркости нуль. Края есть только
+  // во втором. Это ровно случай «тёмное на тёмном»: шаг в тени, движение
+  // только по плечам.
+  const lum = new Float32Array(GW * GH).fill(100);
+  const flat = new Float32Array(GW * GH);
+  const edged = new Float32Array(GW * GH);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) edged[y * GW + x] = 90;
+
+  const silent = V.motionSignal([lum, lum], [flat, flat]).score[0];
+  assert.equal(silent, 0, 'без краёв и без яркости сигнала нет');
+
+  const seen = V.motionSignal([lum, lum], [flat, edged]).score[0];
+  assert.ok(seen > 20, `края должны дать сигнал, получено ${seen.toFixed(1)}`);
+});
+
+/* ---------- кадр контакта ---------- */
+
+test('contactFrame: контакт — это провал между махом и переносом тела', () => {
+  // мах -> стопа -> перенос тела
+  const c = Float32Array.from([0.1, 0.3, 0.8, 0.6, 0.2, 0.15, 0.5, 0.9, 0.4, 0.1]);
+  assert.equal(V.contactFrame(c, 0, c.length - 1), 5, 'контакт в провале, а не на пике');
+});
+
+test('contactFrame: без второго всплеска возвращается пик', () => {
+  const c = Float32Array.from([0.1, 0.4, 0.9, 0.5, 0.2, 0.1]);
+  assert.equal(V.contactFrame(c, 0, c.length - 1), 2);
+});
+
+test('contactFrame: плато не выдаёт ложный контакт', () => {
+  // Плато — это один всплеск, а не мах и стопа. Настоящая постановка это
+  // провал; на ровном участке контакта нет, и выдумывать его нельзя.
+  const c = Float32Array.from([0.1, 0.5, 0.5, 0.5, 0.2, 0.1]);
+  const k = V.contactFrame(c, 0, c.length - 1);
+  assert.ok(k >= 1 && k <= 3, `контакт должен остаться внутри плато, получен ${k}`);
+});
+
+test('contactFrame: мелкий провал не считается постановкой', () => {
+  // Провал есть, но мелкий: 0.7 от всплесков — это не остановка стопы.
+  const c = Float32Array.from([0.1, 0.9, 0.75, 0.9, 0.1]);
+  assert.equal(V.contactFrame(c, 0, c.length - 1), 1, 'мелкая просадка — не контакт');
+});
+
+test('at: contact даёт кадр постановки, а не середину замаха', () => {
+  // Шаг = мах (rel 2) -> стопа на полу (rel 3, предмет СТОИТ) -> перенос (rel 4).
+  // Пик энергии приходится на мах; контакт — на кадр, где предмет замер.
+  const fps = 25;
+  const base = field();
+  const frames = [];
+  for (let i = 0; i < 250; i++) {
+    const rel = i % 15;
+    const x0 = rel <= 1 ? 6 : rel <= 3 ? 10 : rel === 4 ? 14 : 6;
+    const g = Float32Array.from(base);
+    for (let y = 8; y < 13; y++) for (let x = x0; x < x0 + 4; x++) g[y * GW + x] += 140;
+    frames.push(g);
+  }
+  const pk = V.analyzeFrames(frames, fps, { at: 'peak' }).events;
+  const ct = V.analyzeFrames(frames, fps, { at: 'contact' }).events;
+  assert.equal(pk.length, ct.length, 'события одни и те же, время разное');
+  const later = ct.filter((e, i) => e.frame >= pk[i].frame).length;
+  assert.equal(later, ct.length, `контакт не раньше пика во всех событиях (${later} из ${ct.length})`);
+  assert.ok(ct.some((e, i) => e.frame > pk[i].frame), 'хотя бы где-то контакт сдвинут к постановке');
+});
+
+test('analyzeFrames: края принимаются и усиливают сигнал', () => {
+  const lum = new Float32Array(GW * GH).fill(100);
+  const flat = new Float32Array(GW * GH);
+  const edged = new Float32Array(GW * GH);
+  for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) edged[y * GW + x] = 90;
+  const frames = [lum, lum];
+  const withoutEdges = V.analyzeFrames(frames, 25);
+  const withEdges = V.analyzeFrames(frames, 25, { edges: [flat, edged] });
+  assert.equal(withoutEdges.events.length, 0);
+  assert.equal(withEdges.events.length, 0, 'двух кадров мало для события');
+  assert.ok(Math.max(...withEdges.signal.score) > Math.max(...withoutEdges.signal.score),
+    'сигнал с краями выше, чем без');
+});

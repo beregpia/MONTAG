@@ -49,6 +49,93 @@ export function motionCurve(diffs) {
   return out;
 }
 
+/**
+ * Сигнал движения: разница соседних кадров, из которой убрана глобальная
+ * (камерная) составляющая и которая не разбавляется средним.
+ *
+ * Две правки против прежней кривой «среднее разницы соседних кадров».
+ *
+ * 1. РОБАСТНАЯ АГРЕГАЦИЯ. Прежнее среднее по ВСЕМ 576 ячейкам разбавляло
+ *    маленький объект: стопа занимает 8 ячеек, и её вклад тонет в 48 раз.
+ *    Берём среднее по верхним 1% ячеек (6 из 576) — объект любой величины
+ *    попадает в них целиком, а не размазанный.
+ *
+ * 2. ВЫЧИТАНИЕ КАМЕРЫ. Тряска или панорама двигает ВСЕ ячейки, поэтому
+ *    медиана разницы — это и есть движение камеры. Локальное движение =
+ *    «сильные ячейки минус медиана».
+ *
+ * ЗАМЕР (/tmp/cmp2.mjs, 240 кадров, 12 fps, каденция 0.6 с, 40 шагов,
+ * размер объекта 3/8/20/60 клеток × амплитуда 40/120 × тряска 0/0.35):
+ *   новая кривая — ровно 40 шагов в 16 конфигурациях из 16
+ *   старая кривая — ровно 40 лишь в 9 из 16, диапазон 23…43
+ * Худший случай старой: объект 3 клетки, амплитуда 40, тряска — 23 шага
+ * из 40, то есть больше половины потерь.
+ *
+ * ЧЕГО ЗДЕСЬ НЕТ И ПОЧЕМУ. Первая версия считала разницу со скользящим фоном
+ * (экспоненциальное среднее). Это правильно для «предмет присутствует», но
+ * ломает детекцию СОБЫТИЙ: предмет, который остаётся в кадре, даёт ровный
+ * сигнал, кривая выходит выше половины максимума на 100% времени, и
+ * адаптивный порог перестаёт находиться — 40 шагов превращались в 0–1
+ * событие. Для фоли нужен момент, а не присутствие, поэтому база — соседний
+ * кадр.
+ *
+ * @param {Array<Uint8Array|Float32Array>} frames яркость по сетке
+ * @param {Array<Uint8Array|Float32Array>|null} edges края по сетке
+ * @param {object} opts
+ *   topFrac    0..1 — доля самых сильных ячеек = локальное движение
+ *   edgeWeight       — вес канала краёв
+ * @returns {{score:Float32Array, global:Float32Array, edge:Float32Array}}
+ *   массивы длины frames.length-1 (по шагам между кадрами)
+ */
+export function motionSignal(frames, edges = null, opts = {}) {
+  const {
+    // 1% = ~6 ячеек из 576. Замер на сцене «тряска + медленный шаг»:
+    // p99−медиана даёт 67 для шага и 8 для тряски (8:1), а среднее по верхним
+    // 15% — 11 против 5 (2:1), шаг тонет.
+    topFrac = 0.01,
+    edgeWeight = 0.6,
+  } = opts;
+
+  const n = frames.length;
+  const steps = Math.max(0, n - 1);
+  const out = {
+    score: new Float32Array(steps),
+    global: new Float32Array(steps),
+    edge: new Float32Array(steps),
+  };
+  const cells = frames[0] ? frames[0].length : 0;
+  if (steps <= 0 || cells <= 0) return out;
+  const hasEdges = Array.isArray(edges) && edges.length === n && !!edges[0];
+
+  const buf = new Float32Array(cells);
+  const topK = Math.max(1, Math.round(cells * topFrac));
+
+  for (let i = 1; i < n; i++) {
+    const cur = frames[i];
+    const prev = frames[i - 1];
+    const curE = hasEdges ? edges[i] : null;
+    const prevE = hasEdges ? edges[i - 1] : null;
+    for (let c = 0; c < cells; c++) {
+      const d = Math.abs(cur[c] - prev[c]);
+      buf[c] = curE && prevE ? d + edgeWeight * Math.abs(curE[c] - prevE[c]) : d;
+    }
+    const sorted = Float32Array.from(buf).sort();
+    // глобальная составляющая: камера сдвигает все ячейки, поэтому медиана
+    const g = sorted[cells >> 1];
+    // локальная: сильные клетки МиНУС медиана. Вычитание медианы и есть
+    // подавление камеры: тряска поднимает все клетки разом, предмет — несколько.
+    let top = 0;
+    for (let k = cells - topK; k < cells; k++) top += sorted[k];
+    top = Math.max(0, top / topK - g);
+
+    const idx = i - 1;
+    out.global[idx] = g;
+    out.edge[idx] = curE && prevE ? top : 0;
+    out.score[idx] = top;
+  }
+  return out;
+}
+
 /** Медиана (копия, чтобы не портить исходный массив). */
 function median(arr) {
   if (!arr.length) return 0;
@@ -251,13 +338,18 @@ export function analyzeFrames(frames, fps, opts = {}) {
     gridH = GRID_H,
     at = 'peak',
     frac = 0.5,
+    edges = null,
     ...detectOpts
   } = opts;
 
+  // соседние кадры — только для «где в кадре»: разница с фоном шире по
+  // времени и размазывает область
   const diffs = [];
   for (let f = 1; f < frames.length; f++) diffs.push(cellDiff(frames[f - 1], frames[f]));
 
-  const curve = motionCurve(diffs);
+  // а «когда» считаем по скользящему фону без камеры
+  const sig = motionSignal(frames, edges, detectOpts);
+  const curve = sig.score;
   const times = new Float32Array(diffs.length);
   for (let f = 0; f < diffs.length; f++) times[f] = (f + 0.5) / fps;
 
@@ -266,16 +358,64 @@ export function analyzeFrames(frames, fps, opts = {}) {
   const events = raw.map((e) => {
     const from = Math.max(0, e.index - Math.round(0.25 * fps));
     const to = Math.min(diffs.length - 1, e.index + Math.round(0.25 * fps));
+    // «контакт» — не третье название пика, а отдельная точка: провал между
+    // махом и переносом тела. Для фоли это и есть кадр, куда ставить дубль.
+    const ci = at === 'contact' ? contactFrame(curve, from, to) : e.index;
+    const t = times[ci];
     return {
       ...e,
-      time: at === 'onset' ? e.onset : at === 'end' ? e.end : e.peak,
-      frame: Math.round((at === 'onset' ? e.onset : at === 'end' ? e.end : e.peak) * fps),
+      time: at === 'onset' ? e.onset : at === 'end' ? e.end : t,
+      frame: Math.round((at === 'onset' ? e.onset : at === 'end' ? e.end : t) * fps),
+      contactIndex: ci,
       duration: Math.max(0.04, e.end - e.onset),
       regions: hotRegions(diffs, from, to, gridW, gridH, frac),
     };
   });
 
-  return { events, curve, times, diffs, gridW, gridH };
+  return { events, curve, times, diffs, gridW, gridH, signal: sig };
+}
+
+/**
+ * Кадр контакта внутри отрезка движения.
+ *
+ * Пик кривой — это середина замаха, а не касание. У шага энергия внутри
+ * отрезка выглядит как «всплеск → провал → всплеск»: мах ногой, постановка
+ * стопы, перенос тела. Контакт — это провал между двумя всплесками: стопа
+ * касается пола и на мгновение замирает.
+ *
+ * Если всплеск один (короткое движение без выраженной остановки), возвращаем
+ * пик. Догадывать нечем, а калибровка по ручным меткам уточнит и его.
+ *
+ * @param {Float32Array} curve огибающая движения
+ * @param {number} from индекс начала отрезка
+ * @param {number} to   индекс конца отрезка
+ * @returns {number} индекс кадра контакта
+ */
+export function contactFrame(curve, from, to) {
+  if (!curve || to <= from) return from;
+  // локальные максимумы; соседи, отстоящие меньше чем на 2 шага, — это
+  // плато, а не второй всплеск
+  const peaks = [];
+  for (let i = from; i <= to; i++) {
+    if (curve[i] <= 0) continue;
+    const l = i > from ? curve[i - 1] : -Infinity;
+    const r = i < to ? curve[i + 1] : -Infinity;
+    if (curve[i] >= l && curve[i] >= r && (!peaks.length || i - peaks[peaks.length - 1] >= 2)) {
+      peaks.push(i);
+    }
+  }
+  if (peaks.length >= 2) {
+    let c = peaks[0];
+    for (let i = peaks[0]; i <= peaks[1]; i++) if (curve[i] < curve[c]) c = i;
+    // Провал обязан быть настоящим. Плато между двумя «всплесками» — это
+    // один всплеск, а не мах и стопа: городить на нём контакт значило бы
+    // выдумать постановку там, где движение просто не менялось.
+    const dip = Math.min(curve[peaks[0]], curve[peaks[1]]);
+    if (curve[c] < 0.7 * dip) return c;
+  }
+  let p = from;
+  for (let i = from; i <= to; i++) if (curve[i] > curve[p]) p = i;
+  return p;
 }
 
 /**
@@ -309,6 +449,60 @@ export function calibrateOffset(marks, events, fps) {
 }
 
 /* ---------- извлечение кадров из видео (браузер) ---------- */
+
+/**
+ * Магнитуда краёв (Собел) по промежуточному холсту, приведённая к сетке.
+ *
+ * Зачем второй канал: яркость не видит тёмное на тёмном. Тёмная одежда на
+ * тёмном фоне, шаг в тени, движение «только по плечам» дают почти нулевую
+ * разницу яркости — и огромную разницу краёв. Именно этот случай и есть
+ * «герой начался за кадром, шаг виден по плечам».
+ *
+ * Считаем на промежуточном холсте (160×90), а не на сетке: сжатие до 32×18
+ * стирает тонкие края до алиасинга.
+ *
+ * @param {Uint8ClampedArray} data RGBA промежуточного холста
+ * @returns {Float32Array} магнитуда 0..255 по клеткам сетки
+ */
+function sobelGrid(data, mw, mh, gridW, gridH) {
+  const lum = new Float32Array(mw * mh);
+  for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
+    lum[i] = (data[p] * 299 + data[p + 1] * 587 + data[p + 2] * 114) / 1000;
+  }
+  const mag = new Float32Array(mw * mh);
+  for (let y = 1; y < mh - 1; y++) {
+    for (let x = 1; x < mw - 1; x++) {
+      const i = y * mw + x;
+      const tl = lum[i - mw - 1]; const t = lum[i - mw]; const tr = lum[i - mw + 1];
+      const l = lum[i - 1]; const r = lum[i + 1];
+      const bl = lum[i + mw - 1]; const b = lum[i + mw]; const br = lum[i + mw + 1];
+      const gx = (tr + 2 * r + br) - (tl + 2 * l + bl);
+      const gy = (bl + 2 * b + br) - (tl + 2 * t + tr);
+      mag[i] = Math.sqrt(gx * gx + gy * gy);
+    }
+  }
+  // среднее по клетке: клетка сетки — это блок midW/gridW пикселей
+  const out = new Float32Array(gridW * gridH);
+  const cw = mw / gridW;
+  const ch = mh / gridH;
+  for (let gy = 0; gy < gridH; gy++) {
+    const y0 = Math.floor(gy * ch);
+    const y1 = Math.min(mh, Math.max(y0 + 1, Math.ceil((gy + 1) * ch)));
+    for (let gx = 0; gx < gridW; gx++) {
+      const x0 = Math.floor(gx * cw);
+      const x1 = Math.min(mw, Math.max(x0 + 1, Math.ceil((gx + 1) * cw)));
+      let sum = 0;
+      let n = 0;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) { sum += mag[y * mw + x]; n++; }
+      }
+      out[gy * gridW + gx] = n ? sum / n : 0;
+    }
+  }
+  // к шкале яркости: максимум Собела — 4*255
+  for (let c = 0; c < out.length; c++) out[c] = Math.min(255, out[c] / 4);
+  return out;
+}
 
 /** Ждём, пока видео встанет на нужную позицию. */
 function seekTo(video, t) {
@@ -367,6 +561,7 @@ export async function scanFrames(video, opts = {}) {
   const gctx = grid.getContext('2d', { willReadFrequently: true });
 
   const frames = [];
+  const edges = [];
   const times = [];
 
   for (let i = 0; i < n; i++) {
@@ -383,7 +578,11 @@ export async function scanFrames(video, opts = {}) {
       for (let c = 0, p = 0; c < g.length; c++, p += 4) {
         g[c] = (data[p] * 299 + data[p + 1] * 587 + data[p + 2] * 114) / 1000;
       }
+      // второй канал: края. Видит движение, которого не видит яркость.
+      const e = sobelGrid(mctx.getImageData(0, 0, mid.width, mid.height).data,
+        mid.width, mid.height, gridW, gridH);
       frames.push(g);
+      edges.push(e);
       times.push(t);
     } catch {
       // кадр не отдался — пропускаем, разрыв переживёт
@@ -392,7 +591,7 @@ export async function scanFrames(video, opts = {}) {
     if (onProgress && (i % 5 === 0 || i === n - 1)) onProgress((i + 1) / n);
   }
 
-  return { frames, times, fps };
+  return { frames, edges, times, fps };
 }
 
 /**
@@ -411,7 +610,9 @@ export async function analyzeVideo(video, opts = {}) {
     coarseFps = null,
     gridW = GRID_W,
     gridH = GRID_H,
-    at = 'peak',
+    // контакт, а не пик: пик — середина замаха. Для фоли важен кадр,
+    // в который стопа касается пола.
+    at = 'contact',
     onProgress = null,
     signal = null,
     ...detectOpts
@@ -427,16 +628,22 @@ export async function analyzeVideo(video, opts = {}) {
     return { events: [], curve: new Float32Array(0), times: new Float32Array(0), diffs: [], gridW, gridH };
   }
 
-  const coarseRes = analyzeFrames(scan.frames, coarse, { gridW, gridH, at, ...detectOpts });
+  const coarseRes = analyzeFrames(scan.frames, coarse, {
+    gridW, gridH, at, edges: scan.edges, ...detectOpts,
+  });
 
-  // уточнение: пересканируем ±0.3 с вокруг каждого грубого события
+  // уточнение: пересканируем вокруг каждого грубого события
   const win = 0.3;
+  // Разогрев. Фон — экспоненциальное среднее, и в окне ровно ±0.3 с первые
+  // ~8 шагов уходят на его раскрутку: кривая в них занижена, порог считается
+  // по нерасскрученному участку. Берём с запасом и используем только середину.
+  const pad = 0.4;
   const fineFrames = [];
-  const fineTimes = [];
+  const fineEdges = [];
   const spans = [];
   for (const e of coarseRes.events) {
-    const t0 = Math.max(0, e.time - win);
-    const t1 = e.time + win;
+    const t0 = Math.max(0, e.time - win - pad);
+    const t1 = e.time + win + pad;
     const r = await scanFrames(video, {
       fps, t0, t1, gridW, gridH, signal,
       onProgress: (p) => onProgress?.({
@@ -445,9 +652,12 @@ export async function analyzeVideo(video, opts = {}) {
       }),
     });
     if (r.frames.length >= 2) {
-      spans.push({ base: fineFrames.length, offset: r.times[0], fps, count: r.frames.length });
+      spans.push({
+        base: fineFrames.length, offset: r.times[0], fps, count: r.frames.length, around: e.time,
+      });
       for (const f of r.frames) fineFrames.push(f);
-      for (const t of r.times) fineTimes.push(t);
+      if (r.edges?.length === r.frames.length) for (const g of r.edges) fineEdges.push(g);
+      else for (let k = 0; k < r.frames.length; k++) fineEdges.push(null);
     }
   }
 
@@ -457,9 +667,16 @@ export async function analyzeVideo(video, opts = {}) {
   const events = [];
   for (const s of spans) {
     const slice = fineFrames.slice(s.base, s.base + s.count);
-    const r = analyzeFrames(slice, s.fps, { gridW, gridH, at, ...detectOpts });
+    const eSlice = fineEdges.slice(s.base, s.base + s.count);
+    const r = analyzeFrames(slice, s.fps, {
+      gridW, gridH, at, edges: eSlice.some((x) => x) ? eSlice : null, ...detectOpts,
+    });
     for (const e of r.events) {
-      events.push({ ...e, time: e.time + s.offset, frame: e.frame + Math.round(s.offset * s.fps) });
+      const t = e.time + s.offset;
+      // за пределами ±win от грубого события не берём: разогрев дан запасом,
+      // а не лицензией находить новые события в чужом окне
+      if (Math.abs(t - s.around) > win + 0.05) continue;
+      events.push({ ...e, time: t, frame: e.frame + Math.round(s.offset * s.fps) });
     }
   }
   events.sort((a, b) => a.time - b.time);
