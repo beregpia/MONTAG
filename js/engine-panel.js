@@ -600,26 +600,36 @@ function render() {
 
   /* --- 2. события на картинке --- */
   body.append(el('h3', {}, '2. События на картинке'));
+  // Порядок важен: автомат первый, ручная отметка — исключение. Раньше здесь
+  // первым шёл ручной путь, и читатель уходил отмечать шаги руками, хотя
+  // «Найти движение» разбирает клип целиком одним нажатием.
   body.append(el('p', { class: 'muted small' },
-    'Поставьте playhead на кадр, где происходит действие, укажите категорию и нажмите «Отметить». ',
-    'Кадр берётся точно — от позиции playhead.'));
+    'Нажмите ', el('b', {}, '«🔍 Найти движение»'),
+    ' — движок разберёт картинку клипа под playhead целиком и сам расставит все события. ',
+    'Ручная отметка одного кадра нужна только тогда, когда детектор ',
+    el('b', {}, 'что-то пропустил'), ' или когда события ',
+    el('b', {}, 'тихие'), ' — ткань, бумага, ключи: их по картинке не видно в принципе.'));
   const cats = [...new Set(tracks.filter((t) => t.index).map((t) => t.index.category))];
   const catInput = el('input', { class: 'input', id: 'engine-cat', placeholder: 'категория', list: 'engine-cat-list', value: cats[0] || 'steps' });
   const dl = el('datalist', { id: 'engine-cat-list' });
   for (const c of cats) dl.append(el('option', { value: c }));
   const strInput = el('input', { class: 'input tiny', id: 'engine-strength', type: 'number', min: '0', max: '1', step: '0.1', value: '0.7', title: 'Сила события 0..1' });
   const durInput = el('input', { class: 'input tiny', id: 'engine-duration', type: 'number', min: '0.01', step: '0.01', value: '0.2', title: 'Ожидаемая длительность, с' });
-  const addBtn = el('button', { class: 'btn primary', id: 'engine-add' }, '◎ Отметить в кадре');
-  addBtn.addEventListener('click', addEventAtPlayhead);
-
-  // детектор движения: сам найдёт моменты в клипе под playhead
-  const detBtn = el('button', { class: 'btn', id: 'engine-detect' }, '🔍 Найти движение');
+  // главная кнопка секции — автомат: клип разбирается целиком, ни одного
+  // шага вручную. Ручная отметка стоит рядом, но не главнее.
+  const detBtn = el('button', { class: 'btn primary', id: 'engine-detect' }, '🔍 Найти движение');
   detBtn.title = 'Разобрать картинку клипа и отметить все моменты, где что-то двинулось';
   detBtn.addEventListener('click', detectMotionInClip);
 
-  body.append(el('div', { class: 'row' }, dl, catInput, strInput, durInput, addBtn));
-  body.append(el('div', { class: 'row' }, detBtn,
-    el('span', { class: 'muted small' }, 'детектор видит движение, а не «шаг» — категорию проверьте')));
+  const addBtn = el('button', { class: 'btn', id: 'engine-add' }, '◎ Отметить в кадре');
+  addBtn.title = 'Только для пропусков и тихих событий: один кадр под playhead';
+  addBtn.addEventListener('click', addEventAtPlayhead);
+
+  body.append(el('div', { class: 'row' }, detBtn, addBtn,
+    el('span', { class: 'muted small' },
+      'движок отметит весь клип · ручная отметка — для промахов и тихого')));
+  body.append(el('div', { class: 'row' }, catInput, strInput, durInput,
+    el('span', { class: 'muted small' }, 'категория, сила и длина для ручной отметки')));
   body.append(el('div', { class: 'muted small', id: 'engine-readout' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
 

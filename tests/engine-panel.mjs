@@ -194,3 +194,30 @@ panel.initEnginePanel();
 check('недогруженное видео не роняет панель', !!document.getElementById('engine-detect'));
 
 process.exitCode = done('Панель «Движок»') ? 0 : 1;
+
+/* ---------- порядок обучения: автомат первым ---------- */
+// Панель не должна учить ручному пути как основному: читатель, увидевший
+// «◎ Отметить в кадре» главной кнопкой, уходит отмечать шаги по одному —
+// ровно то, от чего движок избавляет.
+const detBtn0 = document.getElementById('engine-detect');
+const addBtn0 = document.getElementById('engine-add');
+check('кнопки автомата и ручной отметки на месте', !!detBtn0 && !!addBtn0);
+check('«Найти движение» — главная кнопка секции',
+  detBtn0.classList.contains('primary'));
+check('ручная отметка не выглядит главным путём',
+  !addBtn0.classList.contains('primary'));
+check('автомат стоит в разметке выше ручной отметки',
+  !!(detBtn0.compareDocumentPosition(addBtn0) & window.Node.DOCUMENT_POSITION_FOLLOWING));
+
+const eventsH3 = [...document.querySelectorAll('#engine-body h3')]
+  .find((n) => /События на картинке/.test(n.textContent));
+check('секция «События на картинке» найдена', !!eventsH3);
+const intro = eventsH3 ? eventsH3.nextElementSibling : null;
+check('вводный текст секции есть', !!intro);
+check('вводный текст ведёт к автомату', intro && /Найти движение/.test(intro.textContent));
+check('и говорит, когда ручная отметка нужна',
+  intro && (/пропустил/.test(intro.textContent) || /тихие/.test(intro.textContent)));
+check('вводный текст не учит ручному пути как основному',
+  intro && !/нажмите .Отметить./.test(intro.textContent));
+
+process.exitCode = done('Панель «Движок»') ? 0 : 1;
