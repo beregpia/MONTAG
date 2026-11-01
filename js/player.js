@@ -102,17 +102,41 @@ export function videoFor(clip) {
   if (clip._video) return clip._video;
   const media = getMedia(clip.mediaId);
   const v = document.createElement('video');
-  v.src = media?.url || '';
   v.preload = 'auto';
   v.playsInline = true;
   v.muted = true;
+  // Chrome и Edge не декодируют кадры для <video>, которого нет в документе:
+  // drawCover молча уходит при readyState < 2, сцена остаётся чёрной, и висит
+  // подпись «Кадр ещё не декодировался». При «Пуске» декодер оживает сам,
+  // поэтому в воспроизведении картинка была, а на паузе — нет.
+  // Держим элемент в документе, но невидимым. Именно opacity, а не
+  // display:none: display:none останавливает декодирование полностью.
+  v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;'
+    + 'opacity:0;pointer-events:none;';
+  (document.getElementById('video-sink') || document.body).appendChild(v);
   // drawCover молча выходит, пока у видео нет кадра (readyState < 2).
   // Без этих слушателей сцена оставалась чёрной: кадр никто не перерисовывал,
   // когда видео наконец декодировалось.
   const repaint = () => { if (!state.playing) renderFrame(state.time); };
+  // loadedmetadata, а не только loadeddata: как только известны размеры и
+  // длительность, можно выставить currentTime — а до этого placeVideo молча
+  // выходит, и seek не выдаётся вообще.
+  v.addEventListener('loadedmetadata', repaint);
   v.addEventListener('loadeddata', repaint);
   v.addEventListener('canplay', repaint);
   v.addEventListener('seeked', repaint);
+  // файл мог быть перемещён после импорта, или оборвался blob-адрес после
+  // перезагрузки проекта — оба случая молчали раньше
+  v.addEventListener('error', () => {
+    if (state.playing) return;
+    showFrameHint(true, 'Видео не открылось. Файл мог быть перемещён после '
+      + 'импорта — удалите клип и импортируйте заново.');
+  });
+  // src и load — последними: событие error приходит асинхронно, но слушатели
+  // к этому моменту уже стоят, и «файл не открылся» не молчит. load() после
+  // src — документированный способ начать загрузку программно.
+  v.src = media?.url || '';
+  try { v.load(); } catch { /* src мог быть пустым — ошибку покажем ниже */ }
   clip._video = v;
   return v;
 }
@@ -233,20 +257,42 @@ export function adoptResolution(media) {
 /* ---------- рендер кадра ---------- */
 
 /** Подсказка на сцене: клип есть, но кадр ещё не декодировался. */
-function showFrameHint(show) {
+function showFrameHint(show, text = null) {
   let hint = document.getElementById('frame-hint');
   if (!show) {
     hint?.remove();
     return;
   }
-  if (hint) return;
+  const msg = text || 'Кадр ещё не декодировался — подождите или нажмите «Пуск»';
+  if (hint) {
+    // текст мог стать другим: «не декодировался» и «не открылось» — разные беды
+    if (text && hint.textContent !== msg) hint.textContent = msg;
+    return;
+  }
   const stage = document.getElementById('stage');
   if (!stage) return;
   hint = document.createElement('div');
   hint.id = 'frame-hint';
   hint.className = 'frame-hint';
-  hint.textContent = 'Кадр ещё не декодировался — подождите или нажмите «Пуск»';
+  hint.textContent = msg;
   stage.appendChild(hint);
+}
+
+/* ---------- самолечение: декодер мог не успеть ---------- */
+// Кадр рисуется только когда readyState >= 2, а до этого placeVideo молча
+// выходит. Если событие loadeddata/seeked пропущено (или декодер медленный),
+// сцена оставалась чёрной навсегда. Пробуем ещё раз, но ограниченно.
+let frameRetries = 0;
+let frameRetryTimer = 0;
+
+function scheduleFrameRetry() {
+  if (frameRetryTimer) return;
+  if (frameRetries >= 25) return; // ~5 секунд, дальше только подпись
+  frameRetries++;
+  frameRetryTimer = setTimeout(() => {
+    frameRetryTimer = 0;
+    if (!state.playing) renderFrame(state.time);
+  }, 200);
 }
 
 /** Резерв: показываем кадр самим <video> клипа, когда холст не рисует.
@@ -306,7 +352,10 @@ export function renderFrame(t) {
     if (clip._video && !activeIds.has(clip.id) && !clip._video.paused) clip._video.pause();
   }
 
-  showFrameHint(active.length > 0 && !drewFrame);
+  const needFrame = active.length > 0 && !drewFrame;
+  showFrameHint(needFrame);
+  if (needFrame) scheduleFrameRetry();
+  else frameRetries = 0;
 
   // затемнение последнего кадра в самом конце таймлайна
   const total = totalDuration();
@@ -342,6 +391,7 @@ export function play() {
   clockBase = state.time;
   clockStart = performance.now();
   lastFrameT = state.time;
+  frameRetries = 0;
   // разбудим клипы, которые должны играть прямо сейчас
   for (const it of computeLayout()) {
     if (state.time >= it.start && state.time < it.end) {
@@ -433,6 +483,10 @@ export function seek(t) {
   const total = totalDuration();
   state.time = clamp(t, 0, total);
   lastFrameT = state.time;
+  // новая позиция — новый шанс получить кадр. Без сброса счётчик догона
+  // копится между переходами и на пятом переходе сцена перестаёт добирать
+  // кадр совсем, хотя декодер к тому времени мог справиться.
+  frameRetries = 0;
   if (state.playing) {
     clockBase = state.time;
     clockStart = performance.now();

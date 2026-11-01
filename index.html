@@ -121,6 +121,11 @@
 <input type="file" id="file-input" accept="video/*" multiple hidden>
 <input type="file" id="project-input" accept=".json,application/json" hidden>
 
+<!-- Скрытый приёмник для <video> клипов. Chrome и Edge не декодируют кадры для
+     видео, которого нет в документе: сцена оставалась чёрной с подписью
+     «Кадр ещё не декодировался». Стили приёмника — в файле стилей. -->
+<div id="video-sink" aria-hidden="true"></div>
+
 <script type="module" src="js/main.js"></script>
 </body>
 </html>

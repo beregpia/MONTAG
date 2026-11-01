@@ -270,6 +270,21 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .inspector-body .btn { width: 100%; margin-top: 16px; }
 
 /* ---------- таймлайн ---------- */
+/* Приёмник <video> клипов. Нужен, потому что Chrome и Edge не декодируют кадры
+   для видео вне документа: drawCover уходит при readyState < 2, и на паузе
+   сцена оставалась чёрной. Размер нулевой, но не display:none — он
+   останавливает декодирование. Сами элементы ставят opacity: 0. */
+#video-sink {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: -1;
+}
+
 .timeline-wrap {
   border-top: 1px solid var(--line);
   background: var(--bg-panel);

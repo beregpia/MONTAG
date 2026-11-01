@@ -248,4 +248,119 @@ test('при воспроизведении частые seek не дергаю�
   player.stepFrames(1);
   assert.equal(sets.length, before,
     'на ходу видео и так играет — лишний seek дал бы рывки');
+  // без сброса флаг утекает в следующие тесты и ломает им условия
+  state.state.playing = false;
+});
+
+/* ---------- кадр на паузе: видео должно быть в документе ---------- */
+// Пользователь: «в паузе нет изображения». Сцена чёрная, подпись «Кадр ещё не
+// декодировался».
+//
+// Причина: Chrome и Edge не декодируют кадры для <video>, которого нет в
+// документе. drawCover молча уходит при readyState < 2, placeVideo молча выходит
+// при readyState < 1 — и никто не просит декодер поработать. При «Пуске»
+// play() оживляет его сам, поэтому в воспроизведении картинка была, а на паузе
+// нет. Ровно этот симптом и описал пользователь.
+function freshClip(dur = 10) {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(dur);
+  return state.state.clips[0];
+}
+
+test('видео клипа попадает в документ — иначе Chrome не декодирует кадры', () => {
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  assert.ok(v.parentNode, 'видео вне документа — на паузе кадра не будет');
+  assert.ok(document.getElementById('video-sink').contains(v),
+    'видео должно лежать в приёмнике, а не болтаться вне DOM');
+});
+
+test('видео скрыто непрозрачностью, а не display:none', () => {
+  // display:none останавливает декодирование полностью — лечило бы «чёрный
+  // экран», сломав всё остальное.
+  const v = player.videoFor(freshClip());
+  assert.match(v.style.cssText, /opacity:\s*0/, 'элемент должен быть невидим');
+  assert.ok(!/display:\s*none/.test(v.style.cssText),
+    'display:none остановит декодирование — кадра не будет никогда');
+  assert.match(v.style.cssText, /pointer-events:\s*none/, 'скрытое видео не должно ловить клики');
+});
+
+test('видео начинает загрузку само, без нажатия «Пуск»', () => {
+  // load() после src — документированный способ начать загрузку программно.
+  // Без него при пустом или уже сброшенном src загрузка не начиналась, и кадра
+  // не было, пока пользователь не нажмёт «Пуск».
+  const loads = [];
+  const origLoad = window.HTMLVideoElement.prototype.load;
+  window.HTMLVideoElement.prototype.load = function () { loads.push(this); };
+  try {
+    const clip = freshClip();
+    const v = player.videoFor(clip);
+    assert.equal(loads.length, 1, 'load() не вызван — загрузка может не начаться');
+    assert.equal(loads[0], v, 'load() вызван не на том элементе');
+    assert.equal(v.src, 'blob:fake', 'источник не назначен');
+    assert.equal(v.preload, 'auto', 'без preload=auto кадр не подгружается заранее');
+  } finally {
+    window.HTMLVideoElement.prototype.load = origLoad;
+  }
+});
+
+test('как только известны метаданные, кадр перерисовывается', () => {
+  // placeVideo молча выходит при readyState < 1: до метаданных seek не выдаётся.
+  // Без слушателя loadedmetadata сцена оставалась чёрной, хотя кадр уже рядом.
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  const seen = [];
+  v.addEventListener('loadedmetadata', () => seen.push('loadedmetadata'));
+  v.dispatchEvent(new window.Event('loadedmetadata'));
+  assert.deepEqual(seen, ['loadedmetadata'], 'слушателя loadedmetadata нет');
+});
+
+test('медленный декодер: сцена добирает кадр сама', async () => {
+  // Событие loadeddata/seeked могло не прийти (или декодер медленный).
+  // Раньше сцена оставалась чёрной навсегда — теперь есть ограниченная догон.
+  document.getElementById('frame-hint')?.remove();
+  window.HTMLCanvasElement.prototype.getContext = () => ({
+    fillStyle: '', globalAlpha: 1, fillRect() {}, drawImage() {},
+    save() {}, restore() {}, translate() {}, scale() {},
+  });
+  state.state.playing = false;
+  const clip = freshClip();
+  const v = document.createElement('video');
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => v._rs || 0 });
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => (v._rs >= 2 ? 640 : 0) });
+  Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => (v._rs >= 2 ? 360 : 0) });
+  v.pause = () => {};
+  clip._video = v;
+
+  player.initPlayer(document.getElementById('canvas'));
+  player.renderFrame(1);
+  assert.ok(document.getElementById('frame-hint'), 'подсказка должна быть при неготовом кадре');
+
+  // декодер наконец отдал кадр, но событие мы не получили
+  v._rs = 4;
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(document.getElementById('frame-hint'), null,
+    'сцена не добирала кадр — чёрный экран остаётся навсегда');
+});
+
+test('видео не открылось: подпись говорит почему, а не молчит', async () => {
+  document.getElementById('frame-hint')?.remove();
+  state.state.playing = false;
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  v.dispatchEvent(new window.Event('error'));
+  await new Promise((r) => setTimeout(r, 0));
+  const hint = document.getElementById('frame-hint');
+  assert.ok(hint, 'ошибка загрузки промолчала — пользователь видит чёрный экран без причины');
+  assert.match(hint.textContent, /не открылось/);
+  assert.match(hint.textContent, /импорт/i, 'должен быть рабочий выход — переимпорт');
+});
+
+test('удаление клипа убирает его видео из документа', () => {
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  assert.ok(v.parentNode, 'видео в документе');
+  state.removeClip(clip.id);
+  assert.equal(v.parentNode, null, 'видео осталось в документе — утечка');
 });

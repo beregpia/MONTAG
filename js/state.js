@@ -107,6 +107,7 @@ export function removeClip(id) {
     clip._video.pause();
     clip._video.removeAttribute('src');
     clip._video.load();
+    clip._video.remove();
   }
   if (state.selectedClipId === id) selectClip(null);
   bus.emit(EV.CLIPS);
