@@ -235,3 +235,60 @@ test('splitTrackName: три прохода с .L дают одну катего
   assert.deepEqual(got.map((g) => g.pass), ['02', '03', '04']);
   assert.equal(new Set(got.map((g) => `${g.category}#${g.pass}`)).size, 3, 'проходы не должны сливаться');
 });
+
+/* ---------- персонажи: шаг одного не встаёт на движение другого ---------- */
+function twoActors() {
+  return [
+    { id: '02#0', time: 1.0, duration: 0.2, peak: 1.4, rms: 0.5, attack: 0.01, decay20: 0.1,
+      zcr: 0.2, centroid: 10000, band: 'low', strength: 1, category: 'steps', foot: 'L', cadence: 0.6,
+      track: '02', file: 'steps 02.L.wav', source: 'steps 02.L.wav' },
+    { id: '02#1', time: 1.6, duration: 0.2, peak: 1.3, rms: 0.5, attack: 0.01, decay20: 0.1,
+      zcr: 0.2, centroid: 10000, band: 'low', strength: 0.9, category: 'steps', foot: 'R', cadence: 0.6,
+      track: '02', file: 'steps 02.L.wav', source: 'steps 02.L.wav' },
+    { id: '03#0', time: 2.1, duration: 0.2, peak: 0.7, rms: 0.2, attack: 0.02, decay20: 0.2,
+      zcr: 0.03, centroid: 6000, band: 'low', strength: 0.5, category: 'steps', foot: 'L', cadence: 0.5,
+      track: '03', file: 'steps 03.L.wav', source: 'steps 03.L.wav' },
+  ];
+}
+
+test('placeEvents: событие с персонажем берёт дубли только из его дорожки', () => {
+  const lib = twoActors();
+  const { placements } = placeEvents(
+    [{ frame: 30, time: 1.0, category: 'steps', strength: 0.9, duration: 0.2, source: 'steps 03.L.wav' }],
+    lib, { fps: 25 });
+  assert.equal(placements[0].audio.file, 'steps 03.L.wav',
+    'слабое событие не должно тянуть сильный дубль из чужой дорожки');
+});
+
+test('placeEvents: без персонажа берёт из всех дорожек категории', () => {
+  const lib = twoActors();
+  const { placements } = placeEvents(
+    [{ frame: 30, time: 1.0, category: 'steps', strength: 0.9, duration: 0.2 }],
+    lib, { fps: 25 });
+  assert.ok(placements[0].audio, 'событие должно быть размещено');
+  assert.equal(placements[0].audio.file, 'steps 02.L.wav',
+    'сильное событие выбирает сильный дубль из любого прохода');
+});
+
+test('placeEvents: персонажа нет среди дорожек — сказано прямо', () => {
+  const lib = twoActors();
+  const { placements } = placeEvents(
+    [{ frame: 30, time: 1.0, category: 'steps', strength: 0.9, duration: 0.2, source: 'steps 09.L.wav' }],
+    lib, { fps: 25 });
+  assert.equal(placements[0].audio, null);
+  assert.match(placements[0].note, /нет дорожки/);
+});
+
+test('placeEvents: сводка по персонажам считает повторы отдельно', () => {
+  const lib = twoActors();
+  const { summary } = placeEvents([
+    { frame: 25, time: 1.0, category: 'steps', strength: 0.9, duration: 0.2, source: 'steps 02.L.wav' },
+    { frame: 40, time: 1.6, category: 'steps', strength: 0.9, duration: 0.2, source: 'steps 02.L.wav' },
+    { frame: 55, time: 2.1, category: 'steps', strength: 0.5, duration: 0.2, source: 'steps 03.L.wav' },
+  ], lib, { fps: 25 });
+  assert.deepEqual(Object.keys(summary.bySource).sort(),
+    ['steps 02.L.wav', 'steps 03.L.wav']);
+  assert.equal(summary.bySource['steps 02.L.wav'].events, 2);
+  assert.equal(summary.bySource['steps 03.L.wav'].events, 1);
+  assert.equal(summary.bySource['steps 03.L.wav'].placed, 1);
+});

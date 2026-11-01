@@ -51,7 +51,10 @@ export function placeEvents(videoEvents, library, opts = {}) {
 
   for (const v of events) {
     const w = profileOf(v.category).weights;
-    const cands = library.filter((a) => a.category === v.category);
+    // источник (персонаж): если у события он задан, дубли берутся только из
+    // его дорожки — шаг одного персонажа не встаёт на движение другого
+    const cands = library.filter((a) => a.category === v.category
+      && (!v.source || a.source === v.source));
     if (!cands.length) {
       placements.push({
         ...v, audio: null,
@@ -97,7 +100,7 @@ export function placeEvents(videoEvents, library, opts = {}) {
 
   /* сводка по категориям */
   const cats = [...new Set(events.map((e) => e.category))];
-  const summary = { total: events.length, placed: 0, missing: 0, byCategory: {} };
+  const summary = { total: events.length, placed: 0, missing: 0, byCategory: {}, bySource: {} };
   for (const c of cats) {
     const evs = events.filter((e) => e.category === c);
     const done = placements.filter((p) => p.category === c && p.audio);
@@ -111,6 +114,20 @@ export function placeEvents(videoEvents, library, opts = {}) {
     summary.placed += done.length;
   }
   summary.missing = summary.total - summary.placed;
+
+  /* сводка по источникам (персонажам): сколько событий закреплено и где разошлись */
+  const srcs = [...new Set(events.map((e) => e.source || ''))];
+  for (const s of srcs) {
+    const evs = events.filter((e) => (e.source || '') === s);
+    const done = placements.filter((p) => (p.source || '') === s && p.audio);
+    const libN = library.filter((a) => (a.source || '') === s).length;
+    const unique = new Set(done.map((p) => p.audio.id)).size;
+    summary.bySource[s || '—'] = {
+      events: evs.length, placed: done.length, unique, library: libN,
+      repeats: evs.length - unique,
+      noTrack: s !== '' && libN === 0,
+    };
+  }
 
   return { placements, summary };
 }

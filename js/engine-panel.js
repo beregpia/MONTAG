@@ -200,10 +200,18 @@ async function detectMotionInClip() {
         category,
         strength: Number((e.strength ?? 0.7).toFixed(2)),
         duration: Number((e.duration || 0.2).toFixed(2)),
+        // где в кадре произошло движение — по этому зоны привязывают к персонажам
+        region: e.regions?.[0] ? {
+          x: e.regions[0].x, y: e.regions[0].y,
+          w: e.regions[0].w, h: e.regions[0].h,
+        } : null,
+        source: '',
       });
     }
     events.sort((a, b) => a.time - b.time);
-    toast(`Найдено событий: ${res.events.length}. Проверьте категорию — детектор видит движение, а не «шаг».`);
+    const withRegion = events.filter((e) => e.region).length;
+    toast(`Найдено событий: ${res.events.length}`
+      + ` (с позицией в кадре: ${withRegion}). Проверьте категорию — детектор видит движение, а не «шаг».`);
   } catch (err) {
     if (scanAbort?.signal.aborted) toast('Разбор отменён');
     else toast(`Не удалось разобрать картинку: ${err.message || err}`, { type: 'error', timeout: 8000 });
@@ -224,7 +232,8 @@ function runPlacement() {
   const library = [];
   for (const t of indexed) {
     for (const e of t.index.events) {
-      library.push({ ...e, track: t.index.pass || t.index.category, file: t.name, category: t.index.category });
+      library.push({ ...e, track: t.index.pass || t.index.category, file: t.name,
+        category: t.index.category, source: t.name });
     }
   }
   result = placeEvents(events, library, { fps: Number(state.settings.fps) || 25 });
@@ -247,10 +256,11 @@ function download(name, blob) {
 function exportCsv() {
   if (!result) return;
   const fps = Number(state.settings.fps) || 25;
-  const rows = [['кадр', 'таймкод', 'категория', 'сила', 'дорожка', 'файл', 'взять из (с)', 'вырез с', 'вырез по', 'уверенность', 'проверить']];
+  const rows = [['кадр', 'таймкод', 'категория', 'персонаж', 'сила', 'зона', 'дорожка', 'файл', 'взять из (с)', 'вырез с', 'вырез по', 'уверенность', 'проверить']];
   for (const p of result.placements) {
     rows.push([
-      p.frame, tc(p.time, fps), p.category, p.strength,
+      p.frame, tc(p.time, fps), p.category, p.source ? shortName(p.source) : '',
+      p.strength, zoneLabel(p.region),
       p.audio ? p.audio.track : '', p.audio ? (p.audio.file || '') : '',
       p.audio ? p.audio.sourceTime : '', p.audio ? p.audio.cutFrom : '', p.audio ? p.audio.cutTo : '',
       p.audio ? p.confidence : '', p.audio ? (p.review ? 'да' : '') : (p.note || 'нет дубля'),
@@ -270,7 +280,10 @@ function exportJson() {
   download('montag-placement.json', new Blob([JSON.stringify({
     fps,
     placements: result.placements.map((p) => ({
-      frame: p.frame, timecode: tc(p.time, fps), category: p.category, strength: p.strength,
+      frame: p.frame, timecode: tc(p.time, fps), category: p.category,
+      source: p.source ? shortName(p.source) : null,
+      zone: p.region ? zoneLabel(p.region) : null,
+      strength: p.strength,
       audio: p.audio ? {
         id: p.audio.id, track: p.audio.track, file: p.audio.file,
         sourceTime: p.audio.sourceTime, cutFrom: p.audio.cutFrom, cutTo: p.audio.cutTo,
@@ -297,6 +310,41 @@ function exportMidi() {
 function signed(v) {
   const r = Math.abs(v) < 5e-4 ? 0 : v;
   return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toFixed(3)}`;
+}
+
+/** Короткое имя дорожки без расширения — для подписей. */
+function shortName(s) {
+  return String(s || '').replace(/\.[^.]+$/, '');
+}
+
+/** Центр области движения по горизонтали, 0..1, или null если позиции нет. */
+export function zoneCenter(region) {
+  if (!region || !Number.isFinite(region.x) || !Number.isFinite(region.w)) return null;
+  return region.x + region.w / 2;
+}
+
+/** «слева / центр / справа» по центру области движения. */
+export function zoneLabel(region) {
+  const cx = zoneCenter(region);
+  if (cx == null) return '—';
+  if (cx < 1 / 3) return 'слева';
+  if (cx < 2 / 3) return 'центр';
+  return 'справа';
+}
+
+/** События, чья область движения попала в полосу [lo, hi]. */
+export function eventsInZone(events, lo, hi) {
+  return events.filter((e) => {
+    const cx = zoneCenter(e.region);
+    return cx != null && cx >= lo && cx < hi;
+  });
+}
+
+/** Привязывает все события из полосы [lo, hi] к дорожке-персонажу. */
+function bindZone(source, lo, hi) {
+  const hit = eventsInZone(events, lo, hi);
+  for (const e of hit) e.source = source;
+  return hit.length;
 }
 
 function tc(t, fps) {
@@ -422,12 +470,62 @@ function render() {
         el('span', { class: 'mono' }, tc(e.time, state.settings.fps || 25)),
         el('span', {}, e.category),
         el('span', { class: 'muted' }, `сила ${e.strength}`),
+        el('span', { class: 'muted', title: 'где в кадре произошло движение' }, zoneLabel(e.region)),
+        el('span', { class: e.source ? '' : 'muted', title: 'чьи шаги' },
+          e.source ? shortName(e.source) : '— персонаж'),
         del));
     }
     const clearBtn = el('button', { class: 'btn ghost tiny danger', title: 'Удалить все отмеченные события' }, 'Очистить');
     clearBtn.addEventListener('click', () => { events = []; render(); });
     body.append(el('div', { class: 'row' }, el('b', {}, `Отмечено: ${events.length}`), clearBtn));
     body.append(list);
+  }
+
+  /* --- привязка зон кадра к персонажам --- */
+  if (events.length && tracks.some((t) => t.status === 'done')) {
+    body.append(el('h3', {}, 'Чьи шаги: зоны кадра'));
+    body.append(el('div', { class: 'muted small' },
+      'Детектор не различает персонажей — он видит, что в кадре сдвинулось, и где. ',
+      'Укажите для каждой дорожки горизонтальную полосу кадра: все события из неё ',
+      'получат этого персонажа, и «Разместить» возьмёт дубли только из его дорожки.'));
+
+    const bound = events.filter((e) => e.source).length;
+    if (bound) {
+      body.append(el('div', { class: 'muted small' },
+        `с персонажем: ${bound} из ${events.length}`,
+        events.length - bound ? `, без персонажа: ${events.length - bound}` : ''));
+    }
+
+    const rows = [[0, 1 / 3], [1 / 3, 2 / 3], [2 / 3, 1]];
+    for (const [a, b] of rows) {
+      const sel = el('select', { class: 'select', id: 'zone-track' });
+      for (const t of tracks.filter((x) => x.status === 'done')) {
+        sel.append(el('option', { value: t.name }, t.name));
+      }
+      const from = el('input', { class: 'input tiny', type: 'number', min: '0', max: '1', step: '0.01', value: a.toFixed(2), title: 'от (0 — левый край, 1 — правый)' });
+      const to = el('input', { class: 'input tiny', type: 'number', min: '0', max: '1', step: '0.01', value: b.toFixed(2), title: 'до (0 — левый край, 1 — правый)' });
+      const go = el('button', { class: 'btn', id: 'zone-apply' }, 'Привязать');
+      go.addEventListener('click', () => {
+        const track = sel.value;
+        const lo = Math.max(0, Math.min(1, Number(from.value) || 0));
+        const hi = Math.max(0, Math.min(1, Number(to.value) || 0));
+        const n = bindZone(track, Math.min(lo, hi), Math.max(lo, hi));
+        toast(n
+          ? `Персонажу ${shortName(track)} привязано событий: ${n}`
+          : 'В этой полосу нет событий с позицией в кадре', { type: n ? 'ok' : 'warn' });
+        render();
+      });
+      body.append(el('div', { class: 'row' }, sel, from, to, go));
+    }
+    if (bound) {
+      const reset = el('button', { class: 'btn ghost tiny danger' }, 'Сбросить привязку');
+      reset.addEventListener('click', () => {
+        for (const e of events) e.source = '';
+        toast('Привязка зон сброшена — движок снова берёт дубли из всех дорожек');
+        render();
+      });
+      body.append(el('div', { class: 'row' }, reset));
+    }
   }
 
   /* --- 3. расстановка --- */
@@ -459,6 +557,16 @@ function render() {
       body.append(el('div', { class: 'muted small' },
         `${c}: событий ${v.events}, размещено ${v.placed}, уникальных дублей ${v.unique} из ${v.library}`
         + (v.noTrack ? ' — ДОРОЖКИ НЕТ, нужна запись' : v.repeats > 0 ? `, повторов ${v.repeats}` : ', без повторов')));
+    }
+
+    if (s.bySource && Object.keys(s.bySource).length > 1) {
+      for (const [src, v] of Object.entries(s.bySource)) {
+        body.append(el('div', { class: 'muted small' },
+          `${src === '—' ? 'без персонажа' : src}: событий ${v.events}, размещено ${v.placed}`
+          + `, уникальных дублей ${v.unique} из ${v.library}`
+          + (v.noTrack ? ' — ДОРОЖКИ НЕТ, нужна запись'
+            : v.repeats > 0 ? `, повторов ${v.repeats}` : ', без повторов')));
+      }
     }
 
     body.append(el('div', { class: 'row' },

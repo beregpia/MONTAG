@@ -51,3 +51,29 @@ if (cat) {
 }
 
 process.exitCode = done('Панель «Движок»') ? 0 : 1;
+
+
+/* ---------- зоны кадра: кому чьи шаги ---------- */
+const evs = [
+  { id: 'a', region: { x: 0.02, y: 0.4, w: 0.25, h: 0.4 } },   // центр 0.145 → слева
+  { id: 'b', region: { x: 0.55, y: 0.4, w: 0.25, h: 0.4 } },   // центр 0.675 → справа
+  { id: 'c', region: { x: 0.36, y: 0.4, w: 0.22, h: 0.4 } },   // центр 0.47  → центр
+  { id: 'd', region: null },                                    // позиции нет
+];
+
+check('зона считается по центру области движения', panel.zoneCenter(evs[0].region) === 0.145);
+check('слева / центр / справа', [evs[0], evs[2], evs[1]].map((e) => panel.zoneLabel(e.region))
+  .join(',') === 'слева,центр,справа');
+check('событие без позиции не попадает ни в одну зону', panel.zoneLabel(evs[3].region) === '—');
+check('левая треть захватывает только своё событие',
+  panel.eventsInZone(evs, 0, 1 / 3).map((e) => e.id).join() === 'a');
+check('правая треть захватывает только своё событие',
+  panel.eventsInZone(evs, 2 / 3, 1).map((e) => e.id).join() === 'b');
+check('средняя треть захватывает только своё событие',
+  panel.eventsInZone(evs, 1 / 3, 2 / 3).map((e) => e.id).join() === 'c');
+check('полный кадр захватывает все три события с позицией',
+  panel.eventsInZone(evs, 0, 1).length === 3);
+check('зоны стыкуются без перекрытия: граница уходит в следующую',
+  panel.eventsInZone(evs, 0, 0.145).length === 0
+  && panel.eventsInZone(evs, 0.145, 0.3).map((e) => e.id).join() === 'a',
+  'интервал полуоткрытый [lo, hi) — событие на границе не удваивается');
