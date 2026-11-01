@@ -134,4 +134,50 @@ check('персонаж сохраняется — клип попадёт в с
   && state.state.placements.filter((p) => p.source === 'steps 03.L.wav').length === 1);
 st.clearPlacements();
 
+/* ---------- payload для Premiere ---------- */
+const plTrks = [
+  { name: 'steps 02.L.wav', index: { duration: 25.5 } },
+  { name: 'steps 03.L.wav', index: { duration: 31.2 } },
+];
+const plPlaced = [
+  { id: 'p1', time: 1.0, category: 'steps', source: 'steps 02.L.wav', review: false,
+    audio: { file: 'steps 02.L.wav', track: '02', cutFrom: 0.5, cutTo: 0.8 } },
+  { id: 'p2', time: 2.4, category: 'steps', source: 'steps 03.L.wav', review: true,
+    audio: { file: 'steps 03.L.wav', track: '03', cutFrom: 1.2, cutTo: 1.6 } },
+  { id: 'p3', time: 3.9, category: 'steps', source: 'steps 02.L.wav', review: false,
+    audio: { file: 'steps 02.L.wav', track: '02', cutFrom: 2.0, cutTo: 2.3 } },
+];
+const pay = panel.premierePayload(plPlaced, plTrks, 'D:\\Foley\\Ep07', 25);
+check('источники — те дорожки, из которых взяты дубли',
+  pay.sources.map((s) => s.name).join() === 'steps 02.L.wav,steps 03.L.wav');
+check('путь к дорожке склеивается из папки и имени файла',
+  pay.sources[0].path === 'D:\\Foley\\Ep07\\steps 02.L.wav', pay.sources[0].path);
+check('длительность дорожки передаётся — из неё clamping out-точки',
+  pay.sources[0].duration === 25.5 && pay.sources[1].duration === 31.2);
+check('хвостовой слэш папки не удваивается',
+  panel.premierePayload(plPlaced, plTrks, 'D:\\Foley\\', 25).sources[0].path
+    === 'D:\\Foley\\steps 02.L.wav');
+check('без папки в пути остаётся одно имя — Premiere спросит файлы',
+  panel.premierePayload(plPlaced, plTrks, '', 25).sources[0].path === 'steps 02.L.wav');
+check('клипов столько же, сколько размещений', pay.clips.length === 3);
+check('клип несёт позицию на таймлайне и границы в дорожке',
+  pay.clips[0].at === 1 && pay.clips[0].in === 0.5 && pay.clips[0].out === 0.8);
+check('подпись клипа — категория и персонаж',
+  pay.clips[0].label === 'steps steps 02.L', pay.clips[0].label);
+check('маркеров столько же, сколько размещений', pay.markers.length === 3);
+check('имя маркера начинается с номера и таймкода',
+  /^01 00:00:01:00 steps$/.test(pay.markers[0].name), pay.markers[0].name);
+check('комментарий маркера говорит, откуда дубль',
+  pay.markers[0].comment.includes('steps 02.L') && pay.markers[0].comment.includes('0.50'));
+check('неуверенное размещение помечено в комментарии',
+  pay.markers[1].comment.includes('проверить') && !pay.markers[0].comment.includes('проверить'));
+check('дорожка без размещений не попадает в источники',
+  panel.premierePayload([plPlaced[0]],
+    [{ name: 'steps 02.L.wav', index: { duration: 25 } },
+      { name: 'лишняя.wav', index: { duration: 5 } }], 'D:\\F', 25,
+  ).sources.map((s) => s.name).join() === 'steps 02.L.wav');
+check('дорожка размещения, которой нет в панели, всё равно попадает в источники',
+  panel.premierePayload([plPlaced[0]], [], 'D:\\F', 25).sources.length === 1,
+  'иначе клип остался бы без файла');
+
 process.exitCode = done('Панель «Движок»') ? 0 : 1;

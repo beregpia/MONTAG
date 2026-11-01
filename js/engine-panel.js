@@ -18,6 +18,7 @@ import { buildMarkerMidi } from './midi.js';
 import { analyzeVideo, calibrateOffset } from './vision.js';
 import * as player from './player.js';
 import * as bank from './audio-bank.js';
+import { buildFcp7Xml } from './premiere-export.js';
 
 /** @type {Array<{id,name,category,pass,minGap,status,index,error}>} */
 let tracks = [];
@@ -28,6 +29,8 @@ let calMarks = [];
 /** медианное смещение «касание − пик движения», с */
 let calOffset = 0;
 /** предпросмотр размещения: играем картинку и вставляем звук из дорожек */
+/** папка с дорожками на диске — для путей в XML Premiere */
+let prFolder = '';
 let previewing = false;
 let previewRow = -1;      // какая строка таблицы звучит сейчас
 let lastPreviewT = 0;
@@ -406,6 +409,70 @@ function exportMidi() {
   toast(`${markers.length} маркеров → .mid. Cubase/Nuendo: File → Import → MIDI File (включите Import Markers)`);
 }
 
+/* ---------- Premiere Pro ---------- */
+/**
+ * Раскладка размещения в поля FCP7 XML. Отдельная функция, чтобы проверять маппинг без кликов по кнопкам.
+ *
+ * @param {Array} placed  размещения с заполненным audio
+ * @param {Array} trks     дорожки панели
+ * @param {string} folder  папка дорожек на диске (может быть пустой)
+ * @param {number} fps
+ * @returns {{sources: Array, clips: Array, markers: Array}}
+ */
+export function premierePayload(placed, trks, folder, fps) {
+  const join = (name) => (folder ? `${folder.replace(/[\\/]+$/, '')}\\${name}` : name);
+
+  // длительность дорожки: out-точка за концом файла ломает весь импорт
+  const sources = trks
+    .filter((t) => placed.some((p) => p.audio.file === t.name))
+    .map((t) => ({ name: t.name, path: join(t.name), duration: t.index?.duration || 0 }));
+  const known = new Set(sources.map((s) => s.name));
+  for (const p of placed) {
+    if (known.has(p.audio.file)) continue;
+    known.add(p.audio.file);
+    sources.push({ name: p.audio.file, path: join(p.audio.file), duration: 0 });
+  }
+
+  return {
+    sources,
+    clips: placed.map((p) => ({
+      file: p.audio.file,
+      at: p.time,
+      in: p.audio.cutFrom,
+      out: p.audio.cutTo,
+      label: `${p.category || ''} ${p.source ? shortName(p.source) : ''}`.trim(),
+    })),
+    markers: placed.map((p, i) => ({
+      at: p.time,
+      name: `${String(i + 1).padStart(2, '0')} ${tc(p.time, fps)} ${p.category || ''}`.trim(),
+      comment: `${shortName(p.audio.file)} · дубль с ${p.audio.cutFrom.toFixed(2)} `
+        + `до ${p.audio.cutTo.toFixed(2)}` + (p.review ? ' · проверить' : ''),
+    })),
+  };
+}
+
+/**
+ * FCP7 XML (единственный interchange, который Premiere открывает):
+ * клипы на звуковых дорожках — строка на персонажа, плюс маркеры.
+ */
+function exportPremiere() {
+  if (!result?.placements.length) { toast('Сначала выполните размещение', { type: 'error' }); return; }
+  const fps = Number(state.settings.fps) || 25;
+  const placed = result.placements.filter((p) => p.audio);
+  if (!placed.length) { toast('Нет размещённых дублей', { type: 'error' }); return; }
+
+  const payload = premierePayload(placed, tracks, prFolder, fps);
+  const { xml, summary } = buildFcp7Xml({
+    name: `MONTAG фоли ${tc(placed[0].time, fps)}`,
+    fps, width: state.settings.width, height: state.settings.height,
+    ...payload,
+  });
+  download('montag-premiere.xml', new Blob([xml], { type: 'application/xml' }));
+  toast(`XML готов: ${summary.clips} клипов на ${summary.audioTracks} дорожках, `
+    + `${summary.markers} маркеров. Premiere: File → Import`
+    + (prFolder ? '' : '. Путь к дорожкам не указан — клипы приедут офлайн, Premiere спросит файлы'));
+}
+
 /* ---------- рендер ---------- */
 /** Смещение со знаком: +0.048 / −0.120 / 0.000 */
 function signed(v) {
@@ -713,9 +780,28 @@ function render() {
     body.append(el('div', { class: 'row' },
       el('button', { class: 'btn', id: 'engine-csv' }, '⇩ CSV (EdiMarker / Excel)'),
       el('button', { class: 'btn ghost', id: 'engine-json' }, '⇩ JSON'),
-      el('button', { class: 'btn ghost', id: 'engine-midi' }, '⇩ .mid маркеры (Cubase/Nuendo)')));
+      el('button', { class: 'btn ghost', id: 'engine-midi' }, '⇩ .mid маркеры (Cubase/Nuendo)'),
+      el('button', { class: 'btn ghost', id: 'engine-prxml' }, '⇩ Premiere Pro (.xml)')));
     document.getElementById('engine-csv').addEventListener('click', exportCsv);
     document.getElementById('engine-json').addEventListener('click', exportJson);
     document.getElementById('engine-midi').addEventListener('click', exportMidi);
+    document.getElementById('engine-prxml').addEventListener('click', exportPremiere);
+
+    /* Premiere ищет дорожки по полному пути, а браузер отдаёт только имя файла.
+       Поэтому папку монтажёр указывает сам — иначе клипы приедут офлайн. */
+    body.append(el('div', { class: 'row' },
+      el('span', { class: 'muted small' }, 'папка дорожек на диске:'),
+      el('input', {
+        class: 'input', id: 'engine-prpath', placeholder: 'D:\\Foley\\Ep07',
+        title: 'Полный путь к папке, где лежат WAV дорожек. '
+          + 'Без него Premiere спросит, где файлы, при импорте.',
+      })));
+    const prPath = document.getElementById('engine-prpath');
+    prPath.value = prFolder;
+    prPath.addEventListener('change', () => { prFolder = prPath.value.trim(); });
+    body.append(el('div', { class: 'muted small' },
+      'XML открывается в Premiere через File → Import: появляется '
+      + 'последовательность с фоли на звуковых дорожках '
+      + '(строка на персонажа) и маркерами по кадрам.'));
   }
 }
