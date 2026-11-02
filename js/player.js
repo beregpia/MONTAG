@@ -14,6 +14,15 @@ let clockStart = 0;    // performance.now() на момент старта
 let lastFrameT = 0;    // позиция предыдущего кадра (для фоли-триггеров)
 let frameHook = null;  // (prevT, t) => void — устанавливает модуль фоли
 let fallbackVideo = null; // <video> клипа, встроенный в сцену при неработающем холсте
+// Прямой показ: превью показывает сам <video>, а не холст. Включается, когда
+// холст не может достать кадр. Элемент, который ДЕЙСТВИТЕЛЬНО нарисован, браузер
+// декодирует всегда, а спрятанный в приёмнике (2×2, opacity:0) — не всегда.
+// Лучше картинка без переходов, чем чёрный экран с подписью.
+let directVideo = false;
+let directRetries = 0;   // свой бюджет догона в прямом показе
+// Время последней отрисовки. Цикл догона обязан продолжать с НЕГО, а не с
+// state.time: renderFrame зовут и с позицией, которой в state ещё нет.
+let lastRenderT = 0;
 
 /** Регистрирует покадровый хук (используется движком фоли). */
 export function setFrameHook(fn) {
@@ -123,7 +132,6 @@ export function videoFor(clip) {
   // display:none: display:none останавливает декодирование полностью.
   v.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;'
     + 'opacity:0;pointer-events:none;';
-  (document.getElementById('video-sink') || document.body).appendChild(v);
   // drawCover молча выходит, пока у видео нет кадра (readyState < 2).
   // Без этих слушателей сцена оставалась чёрной: кадр никто не перерисовывал,
   // когда видео наконец декодировалось.
@@ -141,11 +149,13 @@ export function videoFor(clip) {
     if (state.playing) return;
     showFrameHint(true, v, 'error');
   });
-  // src и load — последними: событие error приходит асинхронно, но слушатели
-  // к этому моменту уже стоят, и «файл не открылся» не молчит. load() после
-  // src — документированный способ начать загрузку программно.
+  // src ДО appendChild и без load(): это ровно рецепт пробника в media.js,
+  // который в браузере пользователя работает (миниатюра клипа на таймлайне —
+  // живой кадр из видео). Явный load() после src запускает алгоритм загрузки
+  // ВТОРОЙ раз и сбрасывает элемент в readyState 0 — на blob-адресе это могло
+  // уводить загрузку в тупик.
   v.src = media?.url || '';
-  try { v.load(); } catch { /* src мог быть пустым — ошибку покажем ниже */ }
+  (document.getElementById('video-sink') || document.body).appendChild(v);
   clip._video = v;
   return v;
 }
@@ -205,6 +215,12 @@ export function retryCanvas() {
 
 export function initPlayer(canvasEl) {
   canvas = canvasEl;
+  // Свежий старт: состояние восстановления не должно переживать
+  // инициализацию. Без полного сброса счётчик кадрового догона оставался
+  // большим, режим прямого показа включался мгновенно, а холст оставался
+  // спрятанным.
+  resetFrameRetry();
+  if (canvas) canvas.style.display = '';
   ctx = acquire2d(canvasEl);
   if (!ctx) {
     console.warn('[MONTAG] 2D-контекст холста недоступен — включаю резервный видеослой');
@@ -362,6 +378,12 @@ function kickDecoder(v) {
 function resetFrameRetry() {
   frameRetries = 0;
   kicked = new Set();
+  directRetries = 0;
+  if (canvas) canvas.style.display = '';
+  if (directVideo) {
+    directVideo = false;
+    clearFallback();
+  }
   if (frameRetryTimer) {
     clearTimeout(frameRetryTimer);
     frameRetryTimer = 0;
@@ -383,6 +405,7 @@ function scheduleFrameRetry(active = []) {
 /** Резерв: показываем кадр самим <video> клипа, когда холст не рисует.
  *  object-fit: cover повторяет геометрию drawCover, так что картинка та же. */
 function renderFallback(t) {
+  lastRenderT = t;
   const stage = document.getElementById('stage');
   if (!stage) return;
   const it = computeLayout().find((x) => t >= x.start && t < x.end);
@@ -398,11 +421,43 @@ function renderFallback(t) {
     v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;';
     stage.appendChild(v);
   }
+  // звук клипа идёт через граф — и в прямом показе тоже
+  audioChain(it.clip);
   placeVideo(v, clamp(t - it.start + it.clip.in, 0, 1e9));
+  if (v.videoWidth && v.readyState >= 2) {
+    directRetries = 0;
+    // кадр отдан — значит холст теперь сможет его нарисовать, возвращаемся
+    if (directVideo) {
+      directVideo = false;
+      if (canvas) canvas.style.display = '';
+      // видеослой надо убрать со сцены: он добавлен позже холста и лёг бы
+      // поверх него, закрывая картинку с переходами и наложением
+      clearFallback();
+      showFrameHint(false);
+      renderFrame(t);
+    }
+    return;
+  }
+  if (!directVideo) return;
+  directRetries++;
+  if (directRetries % 5 === 0) kickDecoder(v);
+  // Мягкую подпись здесь не показываем: пользователь и так видит видеослой,
+  // и «подождите» поверх него только мешает. Факты (readyState, ширина) —
+  // когда бюджет догона исчерпан и готовой картинки нет совсем.
+  // 12 попыток по 200 мс: к этому моменту пользователь уже ~3.6 с смотрит в
+  // чёрный экран. Дальше ждать бессмысленно — показываем факты.
+  if (directRetries >= 12) showFrameHint(true, v, 'state');
+  if (directRetries < 12 && !state.playing) {
+    setTimeout(() => { if (directVideo) renderFallback(lastRenderT); }, 200);
+  }
 }
 
 export function renderFrame(t) {
-  if (!ctx) { renderFallback(t); return; }
+  lastRenderT = t;
+  // Прямой показ: холст спрятан, превью — сам видеослой. Без этой проверки
+  // каждый renderFrame снова шёл бы через холст, не мог получить кадр и
+  // заново переключался — на каждом seek мигание.
+  if (!ctx || directVideo) { renderFallback(t); return; }
   const { width: W, height: H } = state.settings;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
@@ -438,10 +493,30 @@ export function renderFrame(t) {
   }
 
   const needFrame = active.length > 0 && !drewFrame;
-  showFrameHint(needFrame, active[0] ? videoFor(active[0].clip) : null,
-    frameRetries >= 25 ? 'state' : 'wait');
-  if (needFrame) scheduleFrameRetry(active);
-  else frameRetries = 0;
+  if (needFrame) {
+    if (frameRetries >= 6) {
+      // ~1.2 с догона не помогли. Холст не получает кадр — показываем сам
+      // <video>. Холст прячем: иначе два элемента дерутся за одно место.
+      directVideo = true;
+      if (canvas) canvas.style.display = 'none';
+      showFrameHint(false);
+      renderFallback(t);
+      return;
+    }
+    scheduleFrameRetry(active);
+    showFrameHint(needFrame, active[0] ? videoFor(active[0].clip) : null,
+      frameRetries >= 25 ? 'state' : 'wait');
+  } else {
+    frameRetries = 0;
+    if (directVideo) {
+      directVideo = false;
+      if (canvas) canvas.style.display = '';
+      clearFallback();
+    }
+    // кадр есть — подпись обязана уйти. Без этого она оставалась висеть
+    // поверх нарисованной картинки.
+    showFrameHint(false);
+  }
 
   // затемнение последнего кадра в самом конце таймлайна
   const total = totalDuration();

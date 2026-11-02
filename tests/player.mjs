@@ -286,20 +286,22 @@ test('видео скрыто непрозрачностью, а не display:no
   assert.match(v.style.cssText, /pointer-events:\s*none/, 'скрытое видео не должно ловить клики');
 });
 
-test('видео начинает загрузку само, без нажатия «Пуск»', () => {
-  // load() после src — документированный способ начать загрузку программно.
-  // Без него при пустом или уже сброшенном src загрузка не начиналась, и кадра
-  // не было, пока пользователь не нажмёт «Пуск».
+test('видео создаётся по рецепту пробника, который в браузере работает', () => {
+  // Пробник в media.js делает миниатюру клипа, и она РАБОТАЕТ у пользователя:
+  // на таймлайне виден живой кадр. Значит этот рецепт браузер принимает.
+  // Отличия, которые важно сохранить: src назначается ДО appendChild, и
+  // load() НЕ вызывается. Явный load() после src запускает алгоритм загрузки
+  // второй раз и сбрасывает элемент в readyState 0.
   const loads = [];
   const origLoad = window.HTMLVideoElement.prototype.load;
   window.HTMLVideoElement.prototype.load = function () { loads.push(this); };
   try {
     const clip = freshClip();
     const v = player.videoFor(clip);
-    assert.equal(loads.length, 1, 'load() не вызван — загрузка может не начаться');
-    assert.equal(loads[0], v, 'load() вызван не на том элементе');
+    assert.equal(loads.length, 0, 'load() сбрасывает загрузку — его быть не должно');
     assert.equal(v.src, 'blob:fake', 'источник не назначен');
     assert.equal(v.preload, 'auto', 'без preload=auto кадр не подгружается заранее');
+    assert.ok(v.parentNode, 'элемент в документе');
   } finally {
     window.HTMLVideoElement.prototype.load = origLoad;
   }
@@ -452,11 +454,87 @@ test('когда догон исчерпан, подпись показывае�
   v.pause = () => {};
   state.state.clips[0]._video = v;
   player.seek(2);
-  // бюджет догона — 25 попыток по 200 мс. Ждём исчерпания.
-  await new Promise((r) => setTimeout(r, 6000));
+  // бюджет: 6 попыток на холсте (1.2 с) + 12 в прямом показе (2.4 с)
+  await new Promise((r) => setTimeout(r, 5000));
   const hint = document.getElementById('frame-hint');
   assert.ok(hint, 'подписи нет');
   assert.match(hint.textContent, /readyState 0/,
     'без чисел пользователь не может ничего сообщить, а мы — диагностировать');
   assert.match(hint.textContent, /«Пуск»/, 'должен быть предложен способ проверить');
+});
+
+/* ---------- прямой показ: холст не достал кадр — показываем само видео ---------- */
+// Пользователь трижды присылал чёрную сцену с подписью «Кадр ещё не
+// декодировался», хотя миниатюра клипа на таймлайне — живой кадр из того же
+// файла. Значит видео декодируется, но спрятанный в приёмнике элемент (2×2,
+// opacity:0) браузер кадром не обеспечивает. Элемент, который ДЕЙСТВИТЕЛЬНО
+// нарисован, декодируется всегда — на него и переключаемся.
+function stubbedCanvas() {
+  window.HTMLCanvasElement.prototype.getContext = () => ({
+    fillStyle: '', globalAlpha: 1, fillRect() {}, drawImage() {},
+    save() {}, restore() {}, translate() {}, scale() {},
+  });
+}
+
+function neverReadyVideo() {
+  state.state.playing = false;
+  const clip = freshClip();
+  const v = document.createElement('video');
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => 0 });
+  v.pause = () => {};
+  clip._video = v;
+  return { clip, v };
+}
+
+test('холст не даёт кадр: превью переключается на само видео', async () => {
+  document.getElementById('frame-hint')?.remove();
+  stubbedCanvas();
+  const { v } = neverReadyVideo();
+  player.initPlayer(document.getElementById('canvas'));
+  player.renderFrame(1);
+  // догон идёт ~1.2 с, потом переключение
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.ok(v.parentNode, 'видео нигде не оказалось');
+  assert.equal(v.parentNode.id, 'stage',
+    `видео должно быть показано на сцене, а не спрятано (родитель: ${v.parentNode.id})`);
+  assert.match(v.style.cssText, /object-fit:\s*cover/, 'видео занимает сцену');
+  assert.equal(document.getElementById('canvas').style.display, 'none',
+    'холст должен быть спрятан — иначе два элемента дерутся за одно место');
+  // подпись не нужна: картинка есть
+  // подпись не нужна: картинка есть
+  assert.equal(document.getElementById('frame-hint'), null);
+});
+
+test('прямой показ: когда кадр наконец отдан, превью возвращается на холст', async () => {
+  document.getElementById('frame-hint')?.remove();
+  stubbedCanvas();
+  const { v } = neverReadyVideo();
+  player.initPlayer(document.getElementById('canvas'));
+  player.renderFrame(1);
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(document.getElementById('canvas').style.display, 'none', 'холст спрятан');
+
+  // декодер ожил
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 4 });
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 1920 });
+  Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => 882 });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(document.getElementById('canvas').style.display, '',
+    'холст должен вернуться — transitions и наложение снова работают');
+  assert.equal(v.parentNode, null, 'видео убрано со сцены');
+});
+
+test('прямой показ тоже не дал кадра: подпись показывает факты', async () => {
+  document.getElementById('frame-hint')?.remove();
+  stubbedCanvas();
+  const { v } = neverReadyVideo();
+  player.initPlayer(document.getElementById('canvas'));
+  player.renderFrame(1);
+  await new Promise((r) => setTimeout(r, 6200));
+  const hint = document.getElementById('frame-hint');
+  assert.ok(hint, 'и прямой показ не помог — подписи нет, пользователь не знает почему');
+  assert.match(hint.textContent, /readyState/, 'должны быть факты для сообщения о баге');
+  assert.match(hint.textContent, /ширина/);
 });
