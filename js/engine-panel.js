@@ -10,7 +10,7 @@
  * Категории берутся из имён дорожек — новых в коде не требуется.
  */
 
-import { state, EV, bus, uid, primaryClipAt, setPlacements, setSourceTrack, currentPreviewRow, setVideoAudioOnly } from './state.js';
+import { state, EV, bus, uid, primaryClipAt, setPlacements, setSourceTrack, currentPreviewRow, setVideoAudioOnly, fitSourceTrackToClip } from './state.js';
 import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents, placeLeftovers } from './foley-place.js';
@@ -123,6 +123,7 @@ async function importTracks(fileList) {
           name: f.name, category: t.category, pass: t.pass || '',
           duration: idx.duration, events: idx.events,
         });
+        autoFitToClip(f.name);
       }
     } catch (err) {
       const t = tracks.find((x) => x.id === id);
@@ -563,6 +564,21 @@ function shortName(s) {
 }
 
 /** Центр области движения по горизонтали, 0..1, или null если позиции нет. */
+/**
+ * Подгнать дорожку по размеру клипа под playhead. Вызывается при регистрации исходника:
+ * запись короче или длиннее съёмки — и отметки разъезжаются с картинкой,
+ * тем сильнее, чем дальше от начала. Если видео ещё нет, подгонять нечему —
+ * остаётся кнопка «⥂» в заголовке дорожки на таймлайне.
+ * @returns {number} длительность клипа, 0 если клипа нет
+ */
+export function autoFitToClip(name) {
+  const clip = primaryClipAt(state.time) || state.clips[0];
+  if (!clip) return 0;
+  const span = Math.max(0, clip.out - clip.in);
+  fitSourceTrackToClip(name, span);
+  return span;
+}
+
 export function zoneCenter(region) {
   if (!region || !Number.isFinite(region.x) || !Number.isFinite(region.w)) return null;
   return region.x + region.w / 2;

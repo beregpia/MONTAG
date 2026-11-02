@@ -263,4 +263,24 @@ check('остатки встают по времени записи, а не т�
 check('остатки помечены как требующие проверки',
   loL.placements.filter((p) => p.review).length === 2);
 
+/* ---------- новая дорожка встаёт по размеру клипа ----------
+ * Пользователь: «звуковые файлы в таймлайн должны вставать по размеру клипа». */
+state.state.clips.length = 0;
+state.state.clips.push({ in: 0, out: 60, start: 0, duration: 60, src: 'clip.mp4' });
+state.state.time = 30;
+st.setSourceTrack({ name: 'fit.wav', category: 'steps', pass: '02',
+  duration: 20, events: [{ time: 5, strength: 0.9 }] });
+check('подгонка растягивает запись на длину клипа',
+  Math.abs(panel.autoFitToClip('fit.wav') - 60) < 1e-9, '60 с клип');
+check('длина записи 20 с подгоняна в три раза',
+  Math.abs(st.state.foleyTracks[0].reg.k - 3) < 1e-9, 'к = 60 / 20');
+check('время в записи не тронуто — звук не «пищит»',
+  st.state.foleyTracks[0].events[0].time === 5);
+
+/* без видео подгонять нечем: остаётся кнопка «⥂» в заголовке дорожки */
+st.state.foleyTracks[0].reg = { k: 1, d: 0 };
+st.state.clips.length = 0;
+check('без клипа ничего не ломается', panel.autoFitToClip('fit.wav') === 0);
+check('дорожка остаётся как записана', st.state.foleyTracks[0].reg.k === 1);
+
 process.exitCode = done('Панель «Движок»') ? 0 : 1;

@@ -587,7 +587,8 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
    персонаж вошёл в кадр, и по кадрам это вернее, чем по секундам. */
 .src-nudge {
   flex: 0 0 auto;
-  width: 18px; height: 16px; padding: 0;
+  /* кнопок четыре, а колонка та же 152 px */
+  width: 16px; height: 16px; padding: 0;
   font-size: 9px; line-height: 1;
   color: #6f7787;
   background: #12151b;

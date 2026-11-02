@@ -1,6 +1,6 @@
 /* ============ Таймлайн: клипы, перетаскивание, плейхед, зум ============ */
 
-import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, setTrackVolume, trackAudible, setSourceTrackReg, sourceTimeAt } from './state.js';
+import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, setTrackVolume, trackAudible, setSourceTrackReg, sourceTimeAt, fitSourceTrackToClip, primaryClipAt } from './state.js';
 import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
@@ -592,6 +592,26 @@ function sourceRow(t, width) {
   };
   const shiftTxt = reg.d === 0 ? 'без сдвига'
     : `${reg.d > 0 ? '+' : '−'}${Math.abs(reg.d).toFixed(3)} с`;
+  // Подгонка по размеру клипа. Дорожка короче или длиннее съёмки — и её отметки
+  // разъезжаются с картинкой, тем сильнее, чем дальше от начала. Растяжение
+  // влияет только на размещение отметок: проигрывание выреза идёт по времени
+  // записи, поэтому звук не меняется.
+  const mkFit = (track) => {
+    const clip = primaryClipAt(state.time) || state.clips[0];
+    const span = clip ? Math.max(0, clip.out - clip.in) : 0;
+    const b = el('button', {
+      class: 'src-nudge', title: span > 0
+        ? `Подогнать дорожку по размеру клипа (${span.toFixed(2)} с)`
+        : 'Подогнать по размеру клипа — клипа на таймлайне пока нет',
+      'data-src': track.name,
+    }, '⤢');
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      fitSourceTrackToClip(track.name, span);
+    });
+    b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    return b;
+  };
   // Колонка заголовка — такая же, как у всех остальных строк: .tl-gutter, 152 px.
   // Раньше здесь был якорь нулевой ширины с подписью поверх полосы, и полоса
   // начиналась на 152 px ЛЕВЕЕ видео, линейки и размещения — «исходные дорожки
@@ -604,7 +624,8 @@ function sourceRow(t, width) {
     }, shortTrackName(t.name)),
     mkNudge(-1, '◀', `На кадр раньше (−1/${fps} с)`),
     mkNudge(1, '▶', `На кадр позже (+1/${fps} с)`),
-    mkNudge(0, '⟲', 'Вернуть дорожку к началу видео')));
+    mkFit(t),
+    mkNudge(0, '⟲', 'Сбросить сдвиг — вернуть дорожку к началу видео')));
   const lane = el('div', { class: 'foley-lane', style: `width:${Math.max(width, 1)}px` });
   // Волформа занимает ровно тот участок шкалы видео, который накрывает запись.
   const end = sourceTimeAt(t, t.duration || 0);

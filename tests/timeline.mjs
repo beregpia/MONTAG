@@ -383,8 +383,9 @@ const SRC_EVENTS = [
   { time: 3, duration: 0.2, peak: 0.8, strength: 0.7 },
   { time: 5, duration: 0.2, peak: 0.7, strength: 0.6 },
 ];
+const SRC = 'steps 02.L.wav';
 const putSrc = () => state.setSourceTrack({
-  name: 'steps 02.L.wav', category: 'steps', pass: '02', duration: 20, events: SRC_EVENTS,
+  name: SRC, category: 'steps', pass: '02', duration: 20, events: SRC_EVENTS,
 });
 
 test('исходники: дорожка в состоянии несёт длительность и шаги', () => {
@@ -484,7 +485,8 @@ test('исходники: сдвиг правится кадровыми кно�
   const track = state.state.foleyTracks[0];
   const fps = state.state.settings.fps;
   const q = () => document.querySelectorAll('#foley-track .foley-row.src .src-nudge');
-  assert.equal(q().length, 3, 'три кнопки: на кадр раньше, на кадр позже, сброс');
+  assert.equal(q().length, 4,
+    'четыре кнопки: на кадр раньше, на кадр позже, подгонка по клипу, сброс');
   assert.equal(track.reg.d, 0, 'без правки сдвига нет');
 
   // после клика дорожка перерисовывается, поэтому кнопки переспрашиваем
@@ -496,8 +498,34 @@ test('исходники: сдвиг правится кадровыми кно�
 
   q()[1].click(); q()[1].click();
   assert.ok(Math.abs(track.reg.d - 2 / fps) < 1e-9, 'сдвиг накопился');
-  q()[2].click();
+  q()[3].click();
   assert.equal(track.reg.d, 0, 'сброс возвращает дорожку к началу видео');
+});
+
+test('исходники: дорожка подгоняется по размеру клипа', () => {
+  srcScene();
+  putSrc();
+  // Дорожка 20 с, клип 60 с — без подгонки отметки разъедутся с картинкой
+  const track = state.state.foleyTracks[0];
+  assert.equal(track.duration, 20, 'в сцене дорожка длиной 20 с');
+  assert.equal(track.reg.k, 1, 'без подгонки запись идёт как записана');
+  setSrc(true);
+  const q = () => document.querySelectorAll('#foley-track .foley-row.src .src-nudge');
+  q()[2].click();   // ⤢
+  assert.ok(Math.abs(track.reg.k - 3) < 1e-9,
+    'подгонка растягивает запись на длину клипа: 60 / 20 = 3');
+  // Отметка на 3 с записи после подгонки должна лежать на 9 с таймлайна
+  const row = document.querySelector('#foley-track .foley-row.src');
+  const lefts = Array.from(row.querySelectorAll('.foley-src-tick'))
+    .map((t) => parseFloat(t.style.left));
+  const ats = track.events.map((e) => state.sourceTimeAt(track, e.time));
+  for (let i = 0; i < lefts.length; i++) {
+    assert.equal(lefts[i], ats[i] * (lefts[0] / ats[0]),
+      `отметка ${i} лежит там, куда её перевела подгонка`);
+  }
+  assert.equal(ats[1], 9, 'третья секунда записи после подгонки — девятая таймлайна');
+  // Проигрывание выреза идёт по времени записи, поэтому звук не «пищит»
+  assert.equal(track.events[1].time, 3, 'время в записи не тронуто');
 });
 
 test('sourceTimeAt: запись переводится на шкалу монтажа', () => {
@@ -511,6 +539,34 @@ test('sourceTimeAt: запись переводится на шкалу монт
   // но дорожка могла прийти из сохранённого проекта без него
   assert.equal(state.sourceTimeAt({ duration: 20, events: [] }, 3), 3,
     'без reg время не меняется');
+});
+
+test('fitSourceTrackToClip: запись встаёт по размеру клипа', () => {
+  const reg = (name) => state.state.foleyTracks.find((x) => x.name === name);
+  srcScene();
+  putSrc();                       // дорожка длиной 20 с, события [1,3,5,7]
+  assert.equal(reg(SRC).duration, 20, 'в сцене дорожка 20 с');
+  assert.equal(reg(SRC).reg.k, 1, 'до подгонки запись идёт как записана');
+
+  state.fitSourceTrackToClip(SRC, 60);
+  assert.ok(Math.abs(reg(SRC).reg.k - 3) < 1e-9, '60 / 20 = 3');
+  assert.equal(reg(SRC).events[1].time, 3,
+    'подгонка не трогает время в записи — звук не «пищит»');
+  assert.equal(state.sourceTimeAt(reg(SRC), 3), 9,
+    'третья секунда записи после подгонки — девятая таймлайна');
+  assert.equal(reg(SRC).reg.d, 0, 'сдвиг подгонка не меняет');
+
+  // повторная подгонка считается от текущего размера записи, а не кумулятивно
+  state.fitSourceTrackToClip(SRC, 10);
+  assert.ok(Math.abs(reg(SRC).reg.k - 0.5) < 1e-9, '10 / 20 = 0.5');
+
+  // нет клипа или нет дорожки — ничего не ломается
+  state.fitSourceTrackToClip(SRC, 0);
+  assert.ok(Math.abs(reg(SRC).reg.k - 0.5) < 1e-9, 'нулевой клип не подгоняет');
+  state.fitSourceTrackToClip(SRC + 'нет', 5);
+  assert.equal(state.state.foleyTracks.length, 1, 'несуществующая дорожка игнорируется');
+  putSrc();
+  state.fitSourceTrackToClip(SRC, 60);
 });
 
 test('исходники: отметка шага прослушивает тейк', () => {
