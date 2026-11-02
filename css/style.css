@@ -282,7 +282,8 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   height: 0;
   overflow: visible;
   pointer-events: none;
-  z-index: -1;
+  /* БЕЗ z-index: -1. С ним приёмник уходит за фон страницы, и Chrome считает
+     элемент ненарисованным — декодирование не начинается, кадра нет. */
 }
 
 .timeline-wrap {

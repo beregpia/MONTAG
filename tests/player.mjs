@@ -364,3 +364,99 @@ test('удаление клипа убирает его видео из доку
   state.removeClip(clip.id);
   assert.equal(v.parentNode, null, 'видео осталось в документе — утечка');
 });
+
+/* ---------- «в паузе нет изображения»: вторая волна ---------- */
+// Первая правка (видео в документе) не добила картину. Найдена вторая причина:
+// placeVideo выходил при readyState < 1, а seek — это и есть запрос, который
+// заставляет браузер загрузить и декодировать видео. Без него на элементе,
+// не отдавшем метаданные, ничего не происходило.
+
+test('seek запрашивается даже до метаданных — иначе декодер не запустится', () => {
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  state.state.playing = false;
+  const sets = [];
+  const v = fakeVideo(state.state.clips[0], sets);
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 0 });
+  player.seek(7);
+  assert.equal(sets.length, 1, 'currentTime не выставлен — загрузка не начнётся');
+  assert.equal(sets[0], 7, 'позиция не та');
+});
+
+test('декодеру дан толчок, если кадр не пришёл сам', async () => {
+  document.getElementById('frame-hint')?.remove();
+  state.state.playing = false;
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  const played = [];
+  // Настоящий <video>, а не заглушка-объект: резервный путь (холст не отдал
+  // контекст) делает stage.appendChild(v), и объект не-Node роняет рендер.
+  const v = document.createElement('video');
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => 0 });
+  let standing = true;
+  v.play = () => { played.push(1); standing = false; return Promise.resolve(); };
+  v.pause = () => { standing = true; };
+  state.state.clips[0]._video = v;
+  player.seek(3);
+  assert.equal(played.length, 0, 'толчок не должен быть первым действием');
+  // Опрос, а не жёсткие ожидания: между тестами висят чужие таймеры догона,
+  // и точный момент толчка зависит от того, сколько их накопилось.
+  const until = async (fn, ms) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      if (fn()) return true;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return false;
+  };
+  assert.ok(await until(() => played.length >= 1, 4000),
+    'декодеру не дан толчок — на паузе кадра может не появиться вовсе');
+  assert.ok(await until(() => standing === true, 3000),
+    'после толчка видео должно встать на паузу');
+});
+
+test('подпись не пугает числами, пока догон не исчерпан', async () => {
+  document.getElementById('frame-hint')?.remove();
+  state.state.playing = false;
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  const v = fakeVideo(state.state.clips[0], []);
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 0 });
+  player.seek(2);
+  const hint = document.getElementById('frame-hint');
+  assert.ok(hint, 'подписи нет');
+  assert.match(hint.textContent, /Кадр ещё не декодировался/,
+    'сразу показывать числа рано — догон ещё идёт');
+  await new Promise((r) => setTimeout(r, 300));
+  assert.match(document.getElementById('frame-hint').textContent,
+    /Кадр ещё не декодировался/, 'через 300 мс догон ещё жив');
+});
+
+test('когда догон исчерпан, подпись показывает факты', async () => {
+  document.getElementById('frame-hint')?.remove();
+  state.state.playing = false;
+  state.state.clips.length = 0;
+  state.state.media.length = 0;
+  addClip(60);
+  const v = document.createElement('video');
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 0 });
+  Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => 0 });
+  v.play = () => Promise.resolve();
+  v.pause = () => {};
+  state.state.clips[0]._video = v;
+  player.seek(2);
+  // бюджет догона — 25 попыток по 200 мс. Ждём исчерпания.
+  await new Promise((r) => setTimeout(r, 6000));
+  const hint = document.getElementById('frame-hint');
+  assert.ok(hint, 'подписи нет');
+  assert.match(hint.textContent, /readyState 0/,
+    'без чисел пользователь не может ничего сообщить, а мы — диагностировать');
+  assert.match(hint.textContent, /«Пуск»/, 'должен быть предложен способ проверить');
+});
