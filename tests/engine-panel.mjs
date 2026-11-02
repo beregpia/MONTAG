@@ -236,4 +236,31 @@ check('и говорит, когда ручная отметка нужна',
 check('вводный текст не учит ручному пути как основному',
   intro && !/нажмите .Отметить./.test(intro.textContent));
 
+/* ---------- звуки дорожек без картинки ---------- */
+// Дорожка фоли начинается раньше, чем персонаж появляется в кадре: он ещё за
+// кадром. Детектор такие звуки не видит в принципе, но молча терять их нельзя.
+const leftBtn0 = document.getElementById('engine-leftovers');
+check('кнопка «звуки без картинки» есть в секции размещения', !!leftBtn0);
+check('кнопка второстепенная — главная по-прежнему «Разместить»',
+  leftBtn0 && !leftBtn0.classList.contains('primary'));
+check('подсказка объясняет причину (герой за кадром), а не просто факт',
+  leftBtn0 && /за кадр/.test(leftBtn0.getAttribute('title') || ''));
+check('до размещения кнопка выключена', leftBtn0 && leftBtn0.disabled === true);
+
+// полный поток: часть звуков дорожек не нашла события
+const libL = [];
+for (let i = 0; i < 6; i++) {
+  libL.push({ time: 0.4 + i * 0.6, duration: 0.2, peak: 0.9, category: 'steps',
+    file: 'steps 02.L.wav', source: 'steps 02.L.wav' });
+}
+const visL = [1.6, 2.2, 2.8, 3.4].map((t, i) => ({ id: 'x' + i, time: t, frame: t * 25, category: 'steps', strength: 0.8 }));
+const resL = fp.placeEvents(visL, libL, { fps: 25 });
+const loL = fp.placeLeftovers(resL.placements, libL, { fps: 25, offset: 0 });
+check('движок сообщает, сколько звуков осталось без картинки',
+  resL.summary.libraryTotal === 6 && resL.summary.libraryUnused === 2);
+check('остатки встают по времени записи, а не теряются',
+  loL.added === 2 && loL.placements.length === 6);
+check('остатки помечены как требующие проверки',
+  loL.placements.filter((p) => p.review).length === 2);
+
 process.exitCode = done('Панель «Движок»') ? 0 : 1;

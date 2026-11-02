@@ -94,10 +94,20 @@ function loadMedia(file) {
     const probe = document.createElement('video');
     probe.preload = 'metadata';
     probe.muted = true;
+    probe.playsInline = true;
+    // Chrome и Edge не декодируют кадры для <video>, которого нет в документе.
+    // Для метаданных это чаще всего срабатывает и так, но makeThumb ниже делает
+    // seek и drawImage — на отсоединённом элементе кадр может не собраться, и
+    // миниатюра клипа остаётся чёрной. Держим пробник в том же скрытом
+    // приёмнике, что и плеерные видео: именно opacity, а не display:none.
+    probe.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;'
+      + 'opacity:0;pointer-events:none;';
+    (document.getElementById('video-sink') || document.body).appendChild(probe);
     probe.src = url;
 
     const fail = (msg) => {
       probe.removeAttribute('src');
+      probe.remove();
       URL.revokeObjectURL(url);
       reject(new Error(msg));
     };
@@ -141,6 +151,7 @@ function loadMedia(file) {
       };
       item.thumb = await makeThumb(probe);
       probe.removeAttribute('src');
+      probe.remove();
       resolve(item);
     });
   });

@@ -13,7 +13,7 @@
 import { state, EV, bus, uid, primaryClipAt, setPlacements, setSourceTrack, currentPreviewRow } from './state.js';
 import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
-import { placeEvents } from './foley-place.js';
+import { placeEvents, placeLeftovers } from './foley-place.js';
 import { buildMarkerMidi } from './midi.js';
 import { analyzeVideo, calibrateOffset } from './vision.js';
 import * as player from './player.js';
@@ -35,6 +35,11 @@ let previewing = false;
 let previewRow = -1;      // какая строка таблицы звучит сейчас
 let lastPreviewT = 0;
 let result = null;
+// последняя собранная библиотека дублей — нужна, чтобы добавить звуки без картинки
+let lastLibrary = [];
+// события уже сдвинуты на смещение — добавлять его повторно нельзя
+let calApplied = false;
+// смещение дорожки относительно картинки, считанное по меткам касаний
 let suppress = false;
 
 export function initEnginePanel() {
@@ -330,13 +335,43 @@ function runPlacement() {
         category: t.index.category, source: t.name });
     }
   }
+  // Смещение дорожки относительно картинки: звукорежиссёр пишет дорожку до того,
+  // как персонаж вошёл в кадр. Это нормально — и именно поэтому считаем неиспользованные
+  // звуки и предлагаем доставить их по времени записи.
+  lastLibrary = library;
   result = placeEvents(events, library, { fps: Number(state.settings.fps) || 25 });
   render();
   const s = result.summary;
   const nPlaced = pushPlacementsToTimeline();
   toast(`Размещено ${s.placed} из ${s.total}`
     + (s.missing ? `, без дублей ${s.missing}` : '')
+    + (s.libraryUnused
+      ? ` · звуков без картинки: ${s.libraryUnused} из ${s.libraryTotal}`
+      : '')
     + (nPlaced ? ` · на таймлайн добавлено дублей: ${nPlaced}` : ''));
+}
+
+/**
+ * Достаёт звуки дорожек, для которых не нашлось события на картинке.
+ * Пользователь: «если вначале записанных файлов начинается раньше, возможно герой за кадром
+ * двигается».
+ */
+function runLeftovers() {
+  if (!result || !lastLibrary.length) {
+    toast('Сначала нажмите «Разместить»', { type: 'warn' });
+    return;
+  }
+  const s = result.summary;
+  if (!s.libraryUnused) { toast('Неиспользованных звуков нет', { type: 'ok' }); return; }
+  const r = placeLeftovers(result.placements, lastLibrary, {
+    fps: Number(state.settings.fps) || 25,
+    // если пользователь нажал «Применить», события уже сдвинуты — смещение будет применено дважды
+    offset: calApplied ? 0 : (Number(calOffset) || 0),
+  });
+  result = { ...result, placements: r.placements };
+  const nPlaced = pushPlacementsToTimeline();
+  toast(`Добавлено по времени записи: ${r.added}`
+    + (nPlaced ? ` · на таймлайн: ${nPlaced}` : ''));
 }
 /**
  * Кладёт размещение на таймлайн отдельным слоем клипов: строка на персонажа,
@@ -686,6 +721,7 @@ function render() {
         e.frame = Math.round(e.time * fps0);
       }
       events.sort((a, b) => a.time - b.time);
+      calApplied = true;
       toast(`События сдвинуты на ${signed(calOffset)} с`);
       render();
     });
@@ -777,7 +813,23 @@ function render() {
   }, previewing ? '⏸ Стоп' : '🔊 Прослушать');
   prevBtn.disabled = !result?.placements.length;
   prevBtn.addEventListener('click', () => (previewing ? stopPreview() : startPreview()));
-  body.append(el('div', { class: 'row' }, runBtn, prevBtn));
+  // Достать звуки дорожек, для которых не нашлось события на картинке. Второстепенная
+  // кнопка, а не первая: путем по умолчанию идёт «Разместить».
+  const leftBtn = el('button', {
+    class: 'btn', id: 'engine-leftovers',
+    title: 'Звуки дорожек, для которых не нашлось события на картинке, '
+      + 'вставляются по времени записи со смещением. '
+      + 'Полезно, когда персонаж ещё за кадром',
+  }, '⇨ Звуки без картинки');
+  leftBtn.disabled = !result?.summary?.libraryUnused;
+  leftBtn.addEventListener('click', runLeftovers);
+  body.append(el('div', { class: 'row' }, runBtn, prevBtn, leftBtn));
+  if (result?.summary?.libraryUnused) {
+    body.append(el('div', { class: 'muted small' },
+      'Дорожка чаще всего начинается раньше, чем персонаж появляется в кадре — он ещё за кадром. ',
+      'Такие звуки детектор не видит в принципе. Кнопка достаёт их по времени записи — ',
+      'они попадут на таймлайн помеченными как «нужна проверка».'));
+  }
   if (result?.placements.length) {
     body.append(el('div', { class: 'muted small' },
       'Нажмите «Прослушать»: playhead идёт по таймлайну, и в момент каждого размещения ',

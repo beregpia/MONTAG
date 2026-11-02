@@ -64,16 +64,21 @@ export function placeEvents(videoEvents, library, opts = {}) {
     }
     const used = recent.get(v.category) || [];
     const scored = cands.map((a) => {
+      // Стабильный id дубля. Индексатор даёт событиям порядковый номер `index`,
+      // а не `id`. Без этого все дубли получали id === undefined, штраф за повтор
+      // был одинаков для всех, и каждый шаг получал один и тот же звук:
+      // 4 события на картинке давали четыре одинаковых дубля из 6.
+      const aid = a.id != null ? a.id : `${a.file || a.track || a.category || ''}#${a.time}`;
       const raw = distance(v, a, w);
-      const recentUses = used.filter((u) => u === a.id).length;
-      const totalUses = usedCount.get(a.id) || 0;
+      const recentUses = used.filter((u) => u === aid).length;
+      const totalUses = usedCount.get(aid) || 0;
       // Повтор одного и того же дубля — штраф, чтобы шаги не «заедали».
       const penalty = 0.35 * recentUses + usageWeight * totalUses;
       return { a, raw, score: raw + penalty };
     }).sort((x, y) => x.score - y.score);
 
     const best = scored[0];
-    const id = best.a.id;
+    const id = best.a.id != null ? best.a.id : `${best.a.file || best.a.track || best.a.category || ''}#${best.a.time}`;
     const arr = recent.get(v.category) || [];
     arr.push(id);
     recent.set(v.category, arr.slice(-cooldown));
@@ -114,6 +119,13 @@ export function placeEvents(videoEvents, library, opts = {}) {
     summary.placed += done.length;
   }
   summary.missing = summary.total - summary.placed;
+  // Звуки дорожек, для которых не нашлось события на картинке.
+  // Это нормально: звукорежиссёр записывает дорожку до того, как персонаж
+  // вошёл в кадр. Молча их терять нельзя — поэтому считаем.
+  const usedIds = new Set(placements.filter((p) => p.audio).map((p) => p.audio.id));
+  summary.libraryTotal = library.length;
+  summary.libraryUsed = usedIds.size;
+  summary.libraryUnused = library.length - usedIds.size;
 
   /* сводка по источникам (персонажам): сколько событий закреплено и где разошлись */
   const srcs = [...new Set(events.map((e) => e.source || ''))];
@@ -130,4 +142,56 @@ export function placeEvents(videoEvents, library, opts = {}) {
   }
 
   return { placements, summary };
+}
+
+/**
+ * Размещает звуки дорожек, для которых не нашлось события на картинке,
+ * по их собственному времени со смещением offset.
+ *
+ * Зачем: дорожка чаще всего начинается РАНЬШЕ, чем персонаж появляется в кадре, — он ещё
+ * за кадром. Детектор такие звуки не видит в принципе. Один из них пропадал бы молча.
+ *
+ * Помечаются review: так видно, что они поставлены не по картинке, а по времени записи.
+ *
+ * @param {Array} placements результат placeEvents
+ * @param {Array} library    те же дубли
+ * @param {object} opts {fps, offset, handles, keepUsed?}
+ * @returns {{added:number, placements:Array}}
+ */
+export function placeLeftovers(placements, library, opts = {}) {
+  const { fps = 25, offset = 0, handles = 0.05, keepUsed = true } = opts;
+  const usedIds = new Set(placements.filter((p) => p.audio).map((p) => p.audio.id));
+  const out = placements.slice();
+  let added = 0;
+  for (const a of library) {
+    const aid = a.id != null ? a.id : `${a.file || a.track || a.category || ''}#${a.time}`;
+    if (usedIds.has(aid)) continue;
+    const t = a.time + offset;
+    out.push({
+      id: `lo-${aid}`,
+      time: t,
+      frame: Math.round(t * fps),
+      category: a.category,
+      source: a.source || '',
+      strength: clamp01((a.peak ?? 0) / 1.5),
+      duration: a.duration ?? 0.2,
+      audio: {
+        id: aid,
+        file: a.file || null,
+        track: a.track || a.category,
+        sourceTime: a.time,
+        duration: a.duration,
+        peak: a.peak,
+        centroid: a.centroid,
+        band: a.band,
+        cutFrom: Number((a.time - handles).toFixed(4)),
+        cutTo: Number((a.time + Math.max(a.duration, 0.1) + handles).toFixed(4)),
+      },
+      review: true,
+      note: 'по времени записи — на картинке события не было',
+    });
+    added++;
+  }
+  out.sort((x, y) => x.time - y.time);
+  return { added, placements: out };
 }
