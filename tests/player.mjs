@@ -637,6 +637,24 @@ test('холст не даёт кадр: превью переключается
     'мягкая подпись поверх видеослоя только мешает');
 });
 
+test('кадр считается полученным при readyState 1 — Chrome рисует раньше', () => {
+  // У пользователя картинка была видна, а диагностика лежала поверх неё:
+  // drawCover требовал readyState >= 2, которого не наступает, и сцена навсегда
+  // оставалась в режиме догона. Размеров достаточно.
+  document.getElementById('frame-hint')?.remove();
+  stubbedCanvas();
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 1920 });
+  Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => 882 });
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 1 });
+  player.initPlayer(document.getElementById('canvas'));
+  state.state.time = 0;
+  player.renderFrame(0);
+  assert.equal(document.getElementById('frame-hint'), null,
+    'кадр отдан — диагностика не имеет права висеть поверх картинки');
+});
+
 test('элемент, не отдавший кадр, заменяется свежим, а не мучит до конца сессии', async () => {
   document.getElementById('frame-hint')?.remove();
   stubbedCanvas();

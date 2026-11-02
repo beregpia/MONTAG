@@ -632,9 +632,12 @@ function renderFallback(t) {
   // звук клипа идёт через граф — и в прямом показе тоже
   audioChain(it.clip);
   placeVideo(v, clamp(t - it.start + it.clip.in, 0, 1e9));
-  if (v.videoWidth && v.readyState >= 2) {
+  if (v.videoWidth) {
     directRetries = 0;
-    // кадр отдан — значит холст теперь сможет его нарисовать, возвращаемся
+    // Кадр отдан (размеры известны — см. drawCover) — значит холст теперь
+    // сможет его нарисовать, возвращаемся. Прежний порог readyState >= 2 не
+    // наступал вовсе, и превью навсегда оставалось «сырым» видеослоем без
+    // переходов и наложения.
     if (directVideo) {
       directVideo = false;
       if (canvas) canvas.style.display = '';
@@ -683,7 +686,10 @@ export function renderFrame(t) {
     const clip = it.clip;
     activeIds.add(clip.id);
     const v = videoFor(clip);
-    if (v.videoWidth && v.readyState >= 2) drewFrame = true;
+    // Кадр получен, когда известны размеры — см. drawCover. Прежняя проверка
+    // readyState >= 2 не выполнялась никогда, и сцена навсегда оставалась в
+    // режиме догона.
+    if (v.videoWidth) drewFrame = true;
     const local = clamp(t - it.start + clip.in, 0, Math.max(0, (getMedia(clip.mediaId)?.duration || clip.out) - 0.02));
 
     placeVideo(v, local);
@@ -762,7 +768,13 @@ export function renderFrame(t) {
 }
 
 function drawCover(v, opacity) {
-  if (!v.videoWidth || v.readyState < 2) return;
+  // Порог readyState >= 2 здесь был ошибкой. Chrome отдаёт кадр на холст уже
+  // при readyState 1 (метаданные + один декодированный кадр) — на файле
+  // пользователя картинка была видна в прямом показе, а холст молча не рисовал
+  // из-за этой проверки, и всё оставалось в режиме догона: диагностика лежала
+  // поверх готовой картинки. Размеров достаточно: drawImage на видео без кадра
+  // — безопасное «ничего не сделать», а настоящий сбой ловит try ниже.
+  if (!v.videoWidth) return;
   const { width: W, height: H } = state.settings;
   const scale = Math.max(W / v.videoWidth, H / v.videoHeight);
   const dw = v.videoWidth * scale;
