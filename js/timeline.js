@@ -5,6 +5,7 @@ import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
 import { sfxById } from './sfx.js';
+import { VIDEO_AUDIO_KEY } from './video-audio.js';
 import { auditionEvent, auditionPlacement } from './foley.js';
 import * as bank from './audio-bank.js';
 
@@ -424,6 +425,11 @@ function renderFoleyTrack(total, width) {
     strip.append(row);
   }
 
+  /* --- звук самого клипа: оригинальные шаги, шкала таймлайна --- */
+  if (state.videoAudio.ready && state.videoAudio.steps.length) {
+    strip.append(videoAudioRow(width));
+  }
+
   /* --- исходные дорожки: своя шкала времени --- */
   if (srcExpanded) {
     strip.append(sourceHead());
@@ -606,6 +612,66 @@ function sourceTick(e, t) {
     bank.playCut(t.name, Math.max(0, e.time - 0.05), e.time + (e.duration || 0.2) + 0.05,
       (player.audioContext()?.currentTime ?? 0) + 0.02,
       { ctx: player.audioContext(), out: player.getMasterGain(), gain: state.foleyGain });
+  });
+  return tick;
+}
+
+/**
+ * Звук самого видеоклипа: оригинальные шаги на шкале ТАЙМЛАЙНА.
+ *
+ * В отличие от исходных дорожек фоли, у этой строки шкала общая: звук клипа
+ * синхронен с картинкой, поэтому оригинальный шаг и размещение можно сравнить
+ * на одном масштабе. Цвет отметки — результат сравнения: зелёная совпала,
+ * жёлтая фоли смещён, красная шаг пропущен.
+ */
+function videoAudioRow(width) {
+  const va = state.videoAudio;
+  const row = el('div', { class: 'foley-row' });
+  if (!trackAudible(VIDEO_AUDIO_KEY)) row.classList.add('silent');
+  // rows[i] соответствует steps[i]: сравнение считается по тем же шагам в том
+  // же порядке, поэтому связь по индексу, а не по времени — совпадение времени
+  // в плавающей точке тут ни к чему.
+  row.append(trackHead(VIDEO_AUDIO_KEY, 'Оригинал', va.steps.length));
+  const lane = el('div', { class: 'foley-lane', style: `width:${width}px` });
+  // волформа самого звука — видно, где речь (широкие пологие места), а где шаги
+  if (va.wave.length > 1) {
+    const w = Math.max(width, va.duration ? va.duration * pps : 0);
+    lane.append(sourceWaveform(resample(va.wave, Math.max(24, Math.min(240, Math.round(w * 2)))), w));
+  }
+  for (let i = 0; i < va.steps.length; i++) {
+    const t = va.steps[i].time + (Number(va.offset) || 0);
+    if (t * pps > width) continue;
+    lane.append(origStepTick(t, va.cmp?.rows[i]?.kind, va));
+  }
+  row.append(lane);
+  return row;
+}
+
+/** Приведение огибающей к нужному числу точек: в состоянии хранится запас. */
+function resample(wave, points) {
+  if (wave.length === points) return wave;
+  const out = [];
+  for (let i = 0; i < points; i++) {
+    const a = Math.floor((i * wave.length) / points);
+    const b = Math.max(a + 1, Math.floor(((i + 1) * wave.length) / points));
+    let m = 0;
+    for (let k = a; k < b && k < wave.length; k++) if (wave[k] > m) m = wave[k];
+    out.push(m);
+  }
+  return out;
+}
+
+/** Отметка оригинального шага. Клик ставит playhead на шаг — слышно в такт. */
+function origStepTick(t, kind, va) {
+  const names = { ok: 'совпало', early: 'фоли раньше оригинала', late: 'фоли позже оригинала', miss: 'шаг пропущен' };
+  const tick = el('div', {
+    class: `orig-step${kind ? ' ' + kind : ''}`,
+    style: `left:${t * pps}px`,
+    title: `${fmtTime(t)} · оригинальный шаг\n${names[kind] || 'сравнение недоступно'}`,
+  });
+  tick.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    player.seek(t);
   });
   return tick;
 }

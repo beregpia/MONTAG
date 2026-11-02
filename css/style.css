@@ -583,6 +583,21 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 }
 .foley-src-tick:hover { background: var(--accent-2); width: 3px; }
 
+/* Оригинальный шаг из звука клипа. Цвет — результат сравнения с расстановкой:
+   зелёная совпала, жёлтая фоли смещён, красная шаг пропущен совсем. Цвет
+   читается с первого взгляда, поэтому отметки шире исходных. */
+.orig-step {
+  position: absolute; top: 1px; bottom: 1px; width: 3px;
+  background: #556072;
+  cursor: pointer;
+}
+.orig-step:hover { background: var(--accent-2); width: 4px; }
+.orig-step.ok { background: #4f9d69; }
+.orig-step.early, .orig-step.late { background: #b98a45; }
+.orig-step.miss { background: var(--danger); }
+.orig-step.ok:hover, .orig-step.early:hover, .orig-step.late:hover,
+.orig-step.miss:hover { background: var(--accent-2); }
+
 /* свёрнутый ряд */
 .foley-collapsed {
   position: absolute; inset: 0;

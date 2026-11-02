@@ -182,6 +182,43 @@ test('размещение появляется на таймлайне стро
     'оба дубля первой дорожки в одной строке');
 });
 
+test('оригинальные шаги из звука клипа встают по шкале таймлайна', () => {
+  // Шкала у этой строки ОБЩАЯ с расстановкой: звук клипа синхронен с картинкой.
+  // Если отметить шаг по его локальному времени, а не по времени монтажа,
+  // отметка разойдётся с фоли ровно на смещение клипа — и сравнивать нечего.
+  addClip(10);
+  state.setVideoAudio({
+    name: 'v.mp4',
+    steps: [{ time: 1.0, duration: 0.2 }, { time: 2.0, duration: 0.2 }],
+    dropped: [{ time: 3.0 }], wave: [0.1, 0.5, 1, 0.4, 0.2], duration: 10,
+    offset: 4, error: '',
+  });
+  state.setPlacements([{
+    id: 'p1', time: 5.02, duration: 0.2, category: 'steps',
+    file: 'steps 02.L.wav', cutFrom: 1, cutTo: 1.2,
+  }]);
+  timeline.render();
+
+  const rows = [...document.querySelectorAll('#foley-track .foley-row')];
+  const orig = rows.find((r) => r.querySelector('.orig-step'));
+  assert.ok(orig, 'строки оригинальных шагов нет');
+  assert.match(orig.querySelector('.tl-gutter-name').textContent, /Оригинал/);
+  const ticks = [...orig.querySelectorAll('.orig-step')];
+  assert.equal(ticks.length, 2, 'отметка на каждый найденный шаг');
+  // локальное 1.0 + смещение 4 = 5.0 на таймлайне
+  const pps = timeline.timelinePps();
+  assert.ok(Math.abs(parseFloat(ticks[0].style.left) - 5.0 * pps) < 0.5,
+    `первая отметка должна стоять на ${5.0 * pps}, а не на ${ticks[0].style.left}`);
+  // цвет — результат сравнения: совпало / пропущено
+  assert.equal(ticks[0].className, 'orig-step ok', 'шаг на 5.0 закрыт дублем на 5.02');
+  assert.equal(ticks[1].className, 'orig-step miss', 'шаг на 6.0 никем не закрыт');
+  // состояние звука клипа не должно перетекать в следующие тесты: строка
+  // оригинальных шагов иначе появляется там, где её не ждут
+  state.setVideoAudio({ name: '', steps: [], dropped: [], wave: [], duration: 0, error: '' });
+  state.setPlacements([]);
+  timeline.render();
+});
+
 test('клип шире длинного дубля и уже короткого', () => {
   state.setPlacements([
     { id: 'q1', time: 1, duration: 0.2, file: 'a.wav', cutFrom: 0, cutTo: 0.2, category: 'steps' },

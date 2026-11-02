@@ -1,10 +1,27 @@
 /* ============ Состояние проекта ============ */
 
+import { compareSteps } from './video-audio.js';
+
 export const state = {
   media: [],          // { id, name, url, file, duration, width, height, thumb }
   clips: [],          // { id, mediaId, in, out, transitionIn, volume, name, _video, _gain }
   foley: [],          // { id, time, sfx, gain, offset, band, strength, detected }
   foleyTracks: [],    // исходные дорожки: { name, category, pass, duration, events }
+  // Звук самого видеоклипа: оригинальные шаги и сравнение с расстановкой.
+  // Держится здесь, а не в панели, потому что это читают плеер (ворота),
+  // таймлайн (строка дорожки) и панель движка (сравнение).
+  videoAudio: {
+    name: '',        // имя файла, чей звук разобран
+    ready: false,
+    error: '',
+    steps: [],       // шаги, найденные в звуке клипа (время в шкале клипа)
+    dropped: [],     // что отброшено как не шаги (речь и прочее)
+    duration: 0,
+    offset: 0,       // шкала клипа -> шкала монтажа: start клипа минус его in
+    wave: [],        // огибающая звука клипа для волформы
+    only: true,      // «только шаги»: речь и всё остальное воротами убраны
+    cmp: null,       // результат compareSteps
+  },
   // мьют/соло по дорожке размещения: file -> { mute, solo }. Держится в состоянии,
   // потому что звук читает его из foley.tick, а кнопки рисует таймлайн.
   mix: {},
@@ -50,6 +67,7 @@ export const EV = {
   FOLEY: 'foley-changed',
   PLACEMENTS: 'placements-changed',
   TRACKS: 'tracks-changed',
+  VIDEOAUDIO: 'video-audio-changed',
   MIX: 'mix-changed',
 };
 
@@ -154,12 +172,14 @@ export function clearFoley() {
 /** Полная замена слоя размещения (движок пересчитывает его целиком). */
 export function setPlacements(list) {
   state.placements = list.map((p) => ({ ...p }));
+  refreshVideoAudioCompare();
   bus.emit(EV.PLACEMENTS);
 }
 
 export function clearPlacements() {
   if (!state.placements.length) return;
   state.placements = [];
+  refreshVideoAudioCompare();
   bus.emit(EV.PLACEMENTS);
 }
 
@@ -173,6 +193,51 @@ export function setSourceTrack(t) {
   if (i === -1) state.foleyTracks.push({ ...t });
   else state.foleyTracks[i] = { ...t };
   bus.emit(EV.TRACKS);
+}
+
+/**
+ * Звук видеоклипа разобран. `steps` — шаги, `dropped` — что отброшено как не
+ * шаги (речь, прочее). Сравнение считается здесь, чтобы все три потребителя
+ * видели одно и то же, а не считали каждый своё.
+ */
+export function setVideoAudio(info, placements = state.placements) {
+  // Время шага хранится в шкале клипа (его получают ворота), а размещение живёт
+  // в шкале монтажа. Сравнивать надо в ОДНОЙ шкале — иначе шаг на 1.0 с внутри
+  // клипа, лежащего с 4-й секунды, не сходился бы с дублем на 5.0 с никогда.
+  const offset = Number(info.offset ?? state.videoAudio.offset ?? 0) || 0;
+  const onTimeline = (info.steps || []).map((s) => ({ ...s, time: s.time + offset }));
+  state.videoAudio = {
+    ...state.videoAudio,
+    ...info,
+    ready: !info.error,
+    cmp: info.error ? null : compareSteps(onTimeline, placements, state.settings.fps),
+  };
+  bus.emit(EV.VIDEOAUDIO);
+}
+
+/**
+ * Пересчитывает сравнение с оригиналом.
+ *
+ * Без события: сравнение меняется вместе с расстановкой, а её событие и так
+ * приводит к перерисовке. Отдельный emit здесь давал бы двойную перестройку
+ * таймлайна на каждое размещение.
+ */
+export function refreshVideoAudioCompare() {
+  const va = state.videoAudio;
+  if (!va.ready || !va.steps.length) return;
+  const offset = Number(va.offset) || 0;
+  va.cmp = compareSteps(
+    va.steps.map((s) => ({ ...s, time: s.time + offset })),
+    state.placements,
+    state.settings.fps,
+  );
+}
+
+/** Режим прослушивания: только шаги или запись как есть. */
+export function setVideoAudioOnly(only) {
+  if (state.videoAudio.only === !!only) return;
+  state.videoAudio.only = !!only;
+  bus.emit(EV.VIDEOAUDIO);
 }
 
 export function dropSourceTrack(name) {

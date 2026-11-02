@@ -10,7 +10,7 @@
  * Категории берутся из имён дорожек — новых в коде не требуется.
  */
 
-import { state, EV, bus, uid, primaryClipAt, setPlacements, setSourceTrack, currentPreviewRow } from './state.js';
+import { state, EV, bus, uid, primaryClipAt, setPlacements, setSourceTrack, currentPreviewRow, setVideoAudioOnly } from './state.js';
 import { el, toast, fmtTime } from './ui.js';
 import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents, placeLeftovers } from './foley-place.js';
@@ -72,6 +72,10 @@ export function initEnginePanel() {
   bus.on(EV.PLAY, () => { if (!suppress) refreshReadouts(); });
   bus.on(EV.TIME, (t) => { if (!suppress) refreshReadouts(); previewTick(t); });
   bus.on(EV.PLAY, (on) => { if (!on && previewing) stopPreview(); });
+  // Сверка с оригиналом меняется при размещении, режим — по кнопке. Подпись
+  // обновляем точечно: перестройка панели сбросила бы набранное в полях.
+  bus.on(EV.PLACEMENTS, () => { if (!suppress) refreshVideoAudio(); });
+  bus.on(EV.VIDEOAUDIO, () => { if (!suppress) refreshVideoAudio(); });
   render();
 }
 
@@ -901,5 +905,74 @@ function render() {
       'XML открывается в Premiere через File → Import: появляется '
       + 'последовательность с фоли на звуковых дорожках '
       + '(строка на персонажа) и маркерами по кадрам.'));
+  }
+
+  videoAudioSection(body);
+}
+
+/**
+ * Звук самого клипа: оригинальные шаги и сверка с ними расстановки.
+ *
+ * Секция живёт последней: сравнивать есть смысец только после того, как фоли
+ * расставлено. Перестройку не делает — только подпись, иначе набранное в полях
+ * выше сбрасывалось бы на каждое размещение.
+ */
+function videoAudioSection(body) {
+  const va = state.videoAudio;
+  body.append(el('h3', {}, '4. Оригинал в звуке клипа'));
+  body.append(el('p', { class: 'muted small' },
+    'В съёмочной записи шаги уже есть — вместе с репликами. Движок читает звук ',
+    'клипа, находит в нём шаги и ', el('b', {}, 'убирает всё остальное'),
+    ': речь и прочее воротами не звучит вовсе. Шаги остаются — с ними ',
+    'сверяется расстановка.'));
+
+  const runBtn = el('button', { class: 'btn', id: 'va-run' }, '🔊 Разобрать звук клипа');
+  runBtn.title = 'Прочитать звуковую дорожку клипа и найти в ней шаги';
+  runBtn.addEventListener('click', async () => {
+    const readout = document.getElementById('va-readout');
+    runBtn.disabled = true;
+    if (readout) readout.textContent = 'Читаю звук клипа…';
+    await player.analyzeClipAudio();
+    runBtn.disabled = false;
+    refreshVideoAudio();
+  });
+
+  const onlyBtn = el('button', {
+    class: `btn${va.only ? '' : ' ghost'}`, id: 'va-only',
+    title: 'Что звучит из клипа: только найденные шаги или запись как есть',
+  }, va.only ? '◉ Только шаги' : '○ Как записано');
+  onlyBtn.addEventListener('click', () => setVideoAudioOnly(!state.videoAudio.only));
+
+  body.append(el('div', { class: 'row' }, runBtn, onlyBtn,
+    el('span', { class: 'muted small' }, 'речь и прочее воротами убираются')));
+  body.append(el('div', { class: 'muted small', id: 'va-readout' }, videoAudioReadout()));
+}
+
+/** Подпись секции: что нашли и как расстановка сходится с оригиналом. */
+function videoAudioReadout() {
+  const va = state.videoAudio;
+  if (va.error) return va.error;
+  if (!va.ready) return 'Звук клипа ещё не разобран.';
+  let out = `Шагов в оригинале: ${va.steps.length}`;
+  if (va.dropped.length) out += `, отброшено как не шаги: ${va.dropped.length}`;
+  const c = va.cmp;
+  if (!c) return out + '.';
+  const parts = [`совпало ${c.ok}`];
+  if (c.early) parts.push(`фоли раньше ${c.early}`);
+  if (c.late) parts.push(`фоли позже ${c.late}`);
+  if (c.miss) parts.push(`пропущено ${c.miss}`);
+  if (c.extra) parts.push(`лишних дублей ${c.extra}`);
+  return `${out}. Сверка: ${parts.join(' · ')}.`;
+}
+
+/** Обновляет подпись и кнопку режима — без перестройки секции. */
+function refreshVideoAudio() {
+  const readout = document.getElementById('va-readout');
+  if (readout) readout.textContent = videoAudioReadout();
+  const onlyBtn = document.getElementById('va-only');
+  if (onlyBtn) {
+    const only = state.videoAudio.only;
+    onlyBtn.textContent = only ? '◉ Только шаги' : '○ Как записано';
+    onlyBtn.classList.toggle('ghost', !only);
   }
 }

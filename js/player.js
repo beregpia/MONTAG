@@ -4,7 +4,8 @@
  * для переходов), поэтому превью и экспорт используют один и тот же рендер.
  */
 
-import { state, clamp, computeLayout, totalDuration, getMedia, EV, bus } from './state.js';
+import { state, clamp, computeLayout, totalDuration, getMedia, primaryClipAt, setVideoAudio, EV, bus, trackAudible } from './state.js';
+import { VIDEO_AUDIO_KEY, stepWindows, gateOpenAt, extractVideoAudio, findOriginalSteps, waveformOf } from './video-audio.js';
 
 let canvas = null;
 let ctx = null;
@@ -75,10 +76,17 @@ function audioChain(clip) {
   }
   try {
     const src = actx.createMediaElementSource(clip._video);
+    // Ворота: открываются только на найденных шагах. Между источником и
+    // громкостью — чтобы мьют/соло и громкость работали независимо от режима
+    // «только шаги».
+    const gate = actx.createGain();
+    gate.gain.value = 1;
     const g = actx.createGain();
-    g.gain.value = clip.volume ?? 1;
-    src.connect(g);
+    g.gain.value = trackAudible(VIDEO_AUDIO_KEY) ? (clip.volume ?? 1) : 0;
+    src.connect(gate);
+    gate.connect(g);
     g.connect(masterGain);
+    clip._gate = gate;
     clip._gain = g;
     clip._video.muted = false; // звук теперь идёт через граф
     return g;
@@ -89,7 +97,7 @@ function audioChain(clip) {
 }
 
 export function setClipVolume(clip) {
-  if (clip._gain) clip._gain.gain.value = clip.volume ?? 1;
+  if (clip._gain) clip._gain.gain.value = trackAudible(VIDEO_AUDIO_KEY) ? (clip.volume ?? 1) : 0;
 }
 
 /* ---------- видео элементы ---------- */
@@ -110,6 +118,85 @@ export function setClipVolume(clip) {
  * Ставить currentTime до метаданных можно: браузер сам выполнит seek, как
  * только они будут. Ошибку диапазона ловим.
  */
+/* ---------- ворота звука клипа: «только шаги» ---------- */
+// Окна кэшируются по ссылке на массив шагов: пересобирать их на каждом кадре
+// незачем, а сравнивать ссылки дешевле, чем сравнивать содержимое.
+let gateWindows = null;
+let gateWindowsFor = null;
+
+function refreshGateWindows() {
+  const va = state.videoAudio;
+  if (!va.ready || !va.steps.length) { gateWindows = null; gateWindowsFor = null; return; }
+  if (gateWindowsFor !== va.steps) {
+    gateWindows = stepWindows(va.steps);
+    gateWindowsFor = va.steps;
+  }
+}
+
+/**
+ * Ставит ворота звука клипа в положение для момента local.
+ *
+ * В режиме «только шаги» звучат только найденные шаги: речь и всё остальное
+ * воротами убрано. Плавность в 4 мс — иначе жёсткое переключение на каждом
+ * кадре даёт слышимые щелчки.
+ */
+function updateVideoAudioGate(clip, local) {
+  if (!clip._gate) return;
+  const va = state.videoAudio;
+  let want = 1;
+  if (va.ready && va.only) {
+    refreshGateWindows();
+    want = gateWindows && gateOpenAt(gateWindows, local) ? 1 : 0;
+  }
+  const now = audioCtx ? audioCtx.currentTime : 0;
+  try {
+    clip._gate.gain.setTargetAtTime(want, now, 0.004);
+  } catch { clip._gate.gain.value = want; }
+}
+
+/**
+ * Разбирает звук самого видеоклипа: находит оригинальные шаги и отделяет их от
+ * речи. Результат лежит в state.videoAudio — его читают ворота звука, строка
+ * таймлайна и панель движка.
+ *
+ * Время шагов хранится в шкале САМОГО КЛИПА: ворота получают позицию внутри
+ * клипа, и пересчитывать её было бы ошибкой. Для таймлайна и сравнения добавлено
+ * смещение offset — из шкалы клипа в шкалу монтажа.
+ */
+export async function analyzeClipAudio() {
+  const clip = primaryClipAt(state.time) || state.clips[0];
+  const media = clip ? getMedia(clip.mediaId) : null;
+  if (!clip || !media?.file) {
+    setVideoAudio({
+      name: media?.name || '', steps: [], dropped: [], wave: [], duration: 0,
+      error: 'Файл видео недоступен — переимпортируйте клип',
+    });
+    return state.videoAudio;
+  }
+  try {
+    const actx = ensureAudio()
+      || new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await extractVideoAudio(media.file, actx);
+    const { steps, dropped, duration } = findOriginalSteps(buf);
+    // Смещение из шкалы клипа в шкалу монтажа: локальное время шага плюс него
+    // даёт время на таймлайне.
+    const layout = computeLayout().find((x) => x.clip.id === clip.id);
+    const offset = layout ? layout.start - clip.in : 0;
+    setVideoAudio({
+      name: media.name, steps, dropped, duration, offset,
+      wave: waveformOf(buf, 600, 0, duration) || [], error: '',
+    });
+  } catch (err) {
+    setVideoAudio({
+      name: media.name, steps: [], dropped: [], wave: [], duration: 0,
+      error: err?.message || String(err),
+    });
+  }
+  refreshGateWindows();
+  if (!state.playing) renderFrame(state.time);
+  return state.videoAudio;
+}
+
 function placeVideo(v, local) {
   // Раньше здесь был ранний выход при readyState < 1 — см. комментарий ниже.
   const drift = Math.abs((v.currentTime || 0) - local);
@@ -243,6 +330,17 @@ export function initPlayer(canvasEl) {
   }
   applyResolution();
   renderFrame(state.time);
+  // Мьют/соло видеодорожки и переключение «только шаги» меняют звук, но не
+  // позицию — без этого плеер продолжал бы играть по-старому до следующего
+  // seek, и кнопка M выглядела бы неработающей.
+  bus.on(EV.MIX, () => {
+    for (const clip of state.clips) {
+      if (!clip._gain) continue;
+      clip._gain.gain.value = trackAudible(VIDEO_AUDIO_KEY) ? (clip.volume ?? 1) : 0;
+    }
+    if (!state.playing) renderFrame(state.time);
+  });
+  bus.on(EV.VIDEOAUDIO, () => { if (!state.playing) renderFrame(state.time); });
 }
 
 /** true, если холст недоступен и превью идёт через <video>. */
@@ -503,6 +601,10 @@ export function renderFrame(t) {
     const local = clamp(t - it.start + clip.in, 0, Math.max(0, (getMedia(clip.mediaId)?.duration || clip.out) - 0.02));
 
     placeVideo(v, local);
+    // сначала граф (в нём создаются ворота), потом их положение: иначе на
+    // первом кадре ворот ещё нет и звук звучит как записан
+    audioChain(clip);
+    updateVideoAudioGate(clip, local);
 
     let opacity = 1;
     if (clip.transitionIn === 'crossfade' && it !== active[0]) {
@@ -511,7 +613,6 @@ export function renderFrame(t) {
       opacity = clamp((t - it.start) / state.settings.crossfade, 0, 1);
     }
 
-    audioChain(clip);
     drawCover(v, opacity);
   }
 
@@ -630,6 +731,7 @@ function syncPlayback(t) {
     const v = videoFor(it.clip);
     const local = clamp(t - it.start + it.clip.in, 0, 1e9);
     placeVideo(v, local);
+    updateVideoAudioGate(it.clip, local);
     if (v.paused) v.play().catch(() => { /* ignore */ });
   }
   for (const clip of state.clips) {
