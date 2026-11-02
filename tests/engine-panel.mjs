@@ -283,4 +283,23 @@ st.state.clips.length = 0;
 check('без клипа ничего не ломается', panel.autoFitToClip('fit.wav') === 0);
 check('дорожка остаётся как записана', st.state.foleyTracks[0].reg.k === 1);
 
+/* ---------- фильтр «похоже на шаг» в панели ---------- */
+check('кнопка фильтра на месте', !!document.getElementById('engine-stepfilter'));
+check('порог строгости на месте', !!document.getElementById('engine-stepthr'));
+check('строка сводки после разбора на месте', !!document.getElementById('engine-steps'));
+const sf = document.getElementById('engine-stepfilter');
+const sfLabel = sf.textContent;
+sf.click();
+check('кнопка переключается и показывает состояние',
+  sf.textContent !== sfLabel && /Любое/.test(sf.textContent), sf.textContent);
+sf.click();
+check('обратно включается', /Только шаги/.test(sf.textContent), sf.textContent);
+const thr = document.getElementById('engine-stepthr');
+thr.value = '0.8';
+thr.dispatchEvent(new window.Event('input', { bubbles: true }));
+check('порог принимает значение', thr.value === '0.8');
+thr.value = '99';
+thr.dispatchEvent(new window.Event('input', { bubbles: true }));
+check('порог не уходит за границу 0.9', Number(thr.value) <= 0.9, thr.value);
+
 process.exitCode = done('Панель «Движок»') ? 0 : 1;

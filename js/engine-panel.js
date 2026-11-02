@@ -16,6 +16,7 @@ import { indexTrack, splitTrackName, gapFor } from './foley-library.js';
 import { placeEvents, placeLeftovers } from './foley-place.js';
 import { buildMarkerMidi } from './midi.js';
 import { analyzeVideo, calibrateOffset } from './vision.js';
+import { stepScore, stepSummary, STEP_CADENCE } from './step-filter.js';
 import * as player from './player.js';
 import * as bank from './audio-bank.js';
 import { buildFcp7Xml } from './premiere-export.js';
@@ -179,7 +180,13 @@ let scanning = false;
 // Чувствительность детектора: правда влияет на порог. Раньше приложение
 // советовало её «поднять», а настройки не было — теперь она есть и видна.
 let sensitivity = 0.55;
+// Фильтр «похоже на шаг». Детектор отдаёт «движение вообще», а проект монтажа —
+// фоли для шагов, поэтому по умолчанию включён. Выключать надо для ткани,
+// дверей и прочего тихого.
+let onlySteps = true;
+let stepThreshold = 0.45;
 let scanAbort = null;
+let lastStepStats = '';
 
 /**
  * Разбор картинки: грубый проход по всем кадрам + уточнение каждого события.
@@ -212,7 +219,6 @@ async function detectMotionInClip() {
   }
 
   const catInput = document.getElementById('engine-cat');
-  const category = (catInput?.value || '').trim() || 'steps';
   const fps = Number(state.settings.fps) || 25;
 
   scanning = true;
@@ -252,12 +258,39 @@ async function detectMotionInClip() {
       return;
     }
 
-    for (const e of res.events) {
+    /* Фильтр «похоже на шаг». Детектор отдаёт движение вообще, а проект —
+     * фоли для шагов. Без фильтра в списке оказывались взмахи рук, повороты
+     * головы и дрожь камеры, и монтажёр вычеркивал их руками. */
+    const scored = stepScore(res.events, {
+      cadence: STEP_CADENCE, threshold: stepThreshold,
+    });
+    const picked = onlySteps
+      ? scored.events.filter((e) => e.step >= stepThreshold) : scored.events;
+    lastStepStats = stepSummary(scored, onlySteps);
+    const statsNode = document.getElementById('engine-steps');
+    if (statsNode) statsNode.textContent = lastStepStats;
+
+    if (!picked.length) {
+      toast(onlySteps
+        ? `Похожих на шаги не нашлось: отобрано ${scored.dropped} `
+          + `из ${scored.events.length}. Снизьте порог строгости или нажмите `
+          + '«👣 Любое движение».'
+        : 'Движение не найдено. Уменьшите чувствительность в панели — '
+          + 'или отметьте шаги вручную кнопкой «◎ Отметить в кадре».',
+        { type: 'warn', timeout: 9000 });
+      return;
+    }
+
+    /* Когда фильтр включён, категорию ставит он: отобранное — шаги. Иначе
+     * категорию по-прежнему назначает монтажёр полем выше. */
+    const cat = onlySteps ? 'steps' : ((catInput?.value || '').trim() || 'steps');
+
+    for (const e of picked) {
       events.push({
         id: uid('ev'),
         frame: Math.round(e.time * fps),
         time: e.time,
-        category,
+        category: cat,
         strength: Number((e.strength ?? 0.7).toFixed(2)),
         duration: Number((e.duration || 0.2).toFixed(2)),
         // где в кадре произошло движение — по этому зоны привязывают к персонажам
@@ -265,13 +298,20 @@ async function detectMotionInClip() {
           x: e.regions[0].x, y: e.regions[0].y,
           w: e.regions[0].w, h: e.regions[0].h,
         } : null,
+        // оценка фильтра и причина — чтобы в списке было видно, почему событие шаг
+        step: Number((e.step ?? 0).toFixed(2)),
+        stepWhy: e.stepWhy || '',
         source: '',
       });
     }
     events.sort((a, b) => a.time - b.time);
     const withRegion = events.filter((e) => e.region).length;
-    toast(`Найдено событий: ${res.events.length}`
-      + ` (с позицией в кадре: ${withRegion}). Проверьте категорию — детектор видит движение, а не «шаг».`);
+    toast(`Найдено событий: ${picked.length}`
+      + (onlySteps ? `, похожих на шаги: ${scored.kept} из ${res.events.length}` : '')
+      + ` (с позицией в кадре: ${withRegion}). `
+      + (onlySteps
+        ? 'Категорию проставил детектор: steps.'
+        : 'Проверьте категорию — детектор видит движение, а не «шаг».'));
   } catch (err) {
     if (scanAbort?.signal.aborted) toast('Разбор отменён');
     else toast(`Не удалось разобрать картинку: ${err.message || err}`, { type: 'error', timeout: 8000 });
@@ -728,6 +768,43 @@ function render() {
   body.append(el('div', { class: 'row' }, sens, sensOut,
     el('span', { class: 'muted small' },
       'чувствительность: меньше — найдёт больше шагов')));
+  /* Фильтр «похоже на шаг». Детектор видит движение вообще: шаг, взмах руки,
+   * поворот головы, дрожь камеры. Категорию после этого назначал монтажёр сам —
+   * и в список лезло всё подряд. Фильтр отбирает по четырём признакам шага
+   * (каденция ~0.6 с, удар ступни, низ кадра, смещение вперёд) и сам ставит
+   * категорию steps. Выключать — для ткани, дверей и прочего тихого. */
+  const stepBtn = el('button', { class: 'btn primary', id: 'engine-stepfilter' },
+    '👣 Только шаги');
+  stepBtn.title = 'Включено: детектор оставляет только события, похожие на шаг, '
+    + 'и ставит им категорию steps. Нажмите, чтобы оставить всё движение — '
+    + 'для ткани, дверей и прочего тихого.';
+  const paintStepBtn = () => {
+    stepBtn.textContent = onlySteps ? '👣 Только шаги' : '👣 Любое движение';
+    stepBtn.className = onlySteps ? 'btn primary' : 'btn';
+  };
+  stepBtn.addEventListener('click', () => {
+    onlySteps = !onlySteps;
+    paintStepBtn();
+  });
+  const thr = el('input', {
+    class: 'input tiny', id: 'engine-stepthr', type: 'number',
+    min: '0.1', max: '0.9', step: '0.05', value: String(stepThreshold),
+    title: 'Строгость фильтра 0.1..0.9: выше — остаются только самые чистые '
+      + 'шаги, ниже — больше сомнительных.',
+  });
+  thr.addEventListener('input', () => {
+    const v = Number(thr.value);
+    if (isFinite(v) && v !== 0) {
+      const c = Math.min(0.9, Math.max(0.1, v));
+      // Показать правду: number-input не держит min/max при вводе с клавиатуры,
+      // и в поле оставалось «99», хотя работало 0.9.
+      if (c !== v) thr.value = String(c);
+      stepThreshold = c;
+    }
+  });
+  body.append(el('div', { class: 'row' }, stepBtn, thr,
+    el('span', { class: 'muted small' }, 'отбор шагов и порог строгости')));
+  body.append(el('div', { class: 'muted small', id: 'engine-steps' }, lastStepStats));
   body.append(el('div', { class: 'muted small', id: 'engine-readout' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
 
