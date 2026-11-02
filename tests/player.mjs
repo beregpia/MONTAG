@@ -357,7 +357,9 @@ test('видео создаётся по рецепту пробника, кот
     const v = player.videoFor(clip);
     assert.equal(loads.length, 0, 'load() сбрасывает загрузку — его быть не должно');
     assert.equal(v.src, 'blob:fake', 'источник не назначен');
-    assert.equal(v.preload, 'auto', 'без preload=auto кадр не подгружается заранее');
+    assert.equal(v.preload, 'metadata',
+      'preload=metadata, а не auto — ровно как у пробника: при auto Chrome на '
+      + 'большом файле тянет всю дорожку, и readyState залипает на 1');
     assert.ok(v.parentNode, 'элемент в документе');
     assert.deepEqual(order, ['src-ещё-нет'],
       'элемент должен быть в документе ДО src: загрузка, начавшаяся у элемента '
@@ -504,7 +506,6 @@ test('декодеру дан толчок, если кадр не пришёл 
   v.pause = () => { standing = true; };
   state.state.clips[0]._video = v;
   player.seek(3);
-  assert.equal(played.length, 0, 'толчок не должен быть первым действием');
   // Опрос, а не жёсткие ожидания: между тестами висят чужие таймеры догона,
   // и точный момент толчка зависит от того, сколько их накопилось.
   const until = async (fn, ms) => {
@@ -591,32 +592,51 @@ function neverReadyVideo() {
 test('холст не даёт кадр: превью переключается на само видео', async () => {
   document.getElementById('frame-hint')?.remove();
   stubbedCanvas();
-  const { v } = neverReadyVideo();
+  const { clip } = neverReadyVideo();
   player.initPlayer(document.getElementById('canvas'));
   player.renderFrame(1);
-  // догон идёт ~1.2 с, потом переключение
+  // ~0.4 с элемент меняют на свежий (заклинивший не оживает), потом на сцену
+  // встаёт уже новый. Берём именно текущий, а не тот, что был в начале.
   await new Promise((r) => setTimeout(r, 1500));
+  const v = player.videoFor(clip);
   assert.ok(v.parentNode, 'видео нигде не оказалось');
   assert.equal(v.parentNode.id, 'stage',
     `видео должно быть показано на сцене, а не спрятано (родитель: ${v.parentNode.id})`);
   assert.match(v.style.cssText, /object-fit:\s*cover/, 'видео занимает сцену');
   assert.equal(document.getElementById('canvas').style.display, 'none',
     'холст должен быть спрятан — иначе два элемента дерутся за одно место');
-  // подпись не нужна: картинка есть
-  // подпись не нужна: картинка есть
-  assert.equal(document.getElementById('frame-hint'), null);
+  // Мягкая подпись не нужна: пользователь и так видит видеослой. Диагностика
+  // с числами — другое дело, она появляется позже и по делу.
+  const hint = document.getElementById('frame-hint');
+  assert.ok(!hint || hint.dataset.kind === 'state',
+    'мягкая подпись поверх видеослоя только мешает');
+});
+
+test('элемент, не отдавший кадр, заменяется свежим, а не мучит до конца сессии', async () => {
+  document.getElementById('frame-hint')?.remove();
+  stubbedCanvas();
+  const { clip, v } = neverReadyVideo();
+  player.initPlayer(document.getElementById('canvas'));
+  player.renderFrame(1);
+  // ~0.4 с на быстрый путь, потом замена
+  await new Promise((r) => setTimeout(r, 500));
+  assert.notEqual(player.videoFor(clip), v,
+    'застрявший элемент не оживает: все последующие переходы уходят в тот же '
+    + 'мертвый элемент, и сцена черная до конца сессии');
+  assert.equal(v.parentNode, null, 'старый элемент убран из документа');
 });
 
 test('прямой показ: когда кадр наконец отдан, превью возвращается на холст', async () => {
   document.getElementById('frame-hint')?.remove();
   stubbedCanvas();
-  const { v } = neverReadyVideo();
+  const { clip } = neverReadyVideo();
   player.initPlayer(document.getElementById('canvas'));
   player.renderFrame(1);
   await new Promise((r) => setTimeout(r, 1500));
   assert.equal(document.getElementById('canvas').style.display, 'none', 'холст спрятан');
 
-  // декодер ожил
+  // декодер ожил — на том элементе, который сейчас в деле
+  const v = player.videoFor(clip);
   Object.defineProperty(v, 'readyState', { configurable: true, get: () => 4 });
   Object.defineProperty(v, 'videoWidth', { configurable: true, get: () => 1920 });
   Object.defineProperty(v, 'videoHeight', { configurable: true, get: () => 882 });

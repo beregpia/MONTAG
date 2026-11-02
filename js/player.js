@@ -223,11 +223,48 @@ function placeVideo(v, local) {
   } catch { /* позиция вне доступного диапазона */ }
 }
 
+/**
+ * Выбрасывает <video> клипа и заставляет videoFor создать свежий.
+ *
+ * Пробник в media.js работает у пользователя именно потому, что каждый раз
+ * создаёт новый элемент: preload=metadata, элемент в приёмнике, src, seek на
+ * 0.25 с. Плеер же держит один элемент в clip._video бесконечно. Застрявший
+ * элемент не оживает — каждый следующий seek на нём тоже молчит, readyState
+ * остаётся 1, drawCover выходит, сцена чёрная. Это и есть «работало, а потом
+ * перестало»: элемент залип один раз, и все последующие seek'и уходят в тот же
+ * мёртвый элемент.
+ */
+function recycleClipVideos(active) {
+  for (const it of active) {
+    const clip = it.clip;
+    const v = clip._video;
+    if (!v) continue;
+    // Звуковую привязку снимаем вместе с элементом: gain-узлы привязаны к
+    // своему источнику, а createMediaElementSource на новом элементе бросил бы
+    // InvalidStateError, если старый узел остался висеть.
+    try { clip._gain?.disconnect(); } catch {}
+    try { clip._gate?.disconnect(); } catch {}
+    clip._gain = null;
+    clip._gate = null;
+    try { v.pause(); } catch {}
+    v.removeAttribute('src');
+    v.load();
+    v.remove();
+    clip._video = null;
+  }
+}
+
 export function videoFor(clip) {
   if (clip._video) return clip._video;
   const media = getMedia(clip.mediaId);
   const v = document.createElement('video');
-  v.preload = 'auto';
+  // preload = 'metadata', а не 'auto' — ровно как у пробника в media.js, чья
+  // миниатюра в браузере пользователя работает. При 'auto' Chrome на большом
+  // файле сначала тянет всю дорожку целиком, и readyState способен залипнуть на
+  // 1 (метаданные есть, данных для текущей позиции нет) — drawCover молча выходит,
+  // сцена чёрная. При 'metadata' загрузка начинается сразу с того, что просит
+  // seek, а во время воспроизведения Chrome докачивает данные и сам.
+  v.preload = 'metadata';
   v.playsInline = true;
   v.muted = true;
   // Chrome и Edge не декодируют кадры для <video>, которого нет в документе:
@@ -473,6 +510,7 @@ let frameRetryTimer = 0;
  * отработать хотя бы один кадр. Видео muted, поэтому автополитика не мешает.
  */
 let kicked = new Set();
+let recycled = false;      // в этом цикле догона элемент уже меняли на свежий
 function kickDecoder(v) {
   if (!v || kicked.has(v) || v.readyState >= 2) return;
   kicked.add(v);
@@ -513,6 +551,11 @@ function resetFrameRetry() {
   frameRetries = 0;
   kicked = new Set();
   directRetries = 0;
+  // Счётчик попыток между тестами и быстрыми seek'ами утекает, поэтому замена
+  // заклинившего элемента привязана не к номеру попытки, а к флагу цикла:
+  // иначе при старте со счётчиком 5 условие «ровно вторая попытка» не
+  // срабатывает никогда, и чёрная сцена остаётся навсегда.
+  recycled = false;
   if (canvas) canvas.style.display = '';
   if (directVideo) {
     directVideo = false;
@@ -530,10 +573,20 @@ function scheduleFrameRetry(active = []) {
   frameRetries++;
   frameRetryTimer = setTimeout(() => {
     frameRetryTimer = 0;
-    if (!state.playing) renderFrame(state.time);
+    if (state.playing) return;
+    // Исключение внутри перерисовки не должно обрывать догон: таймер к этому
+    // моменту уже обнулён, и без повтора цепочка замирает навсегда — сцена
+    // чёрная, подпись висит, и непонятно почему.
+    try {
+      renderFrame(state.time);
+    } catch (err) {
+      console.warn('[MONTAG] перерисовка кадра не удалась:', err?.message || err);
+      if (frameRetries < 25) scheduleFrameRetry(active);
+    }
   }, 200);
-  // третья попытка (~0.6 с): если перерисовка не помогает — дело в декодере
-  if (frameRetries === 3) for (const it of active) kickDecoder(videoFor(it.clip));
+  // толкаем декодер с первой же попытки: ждать трёх значит потерять 0.6 с на
+  // том, что решается одним play()
+  if (frameRetries === 1) for (const it of active) kickDecoder(videoFor(it.clip));
 }
 
 /** Резерв: показываем кадр самим <video> клипа, когда холст не рисует.
@@ -578,10 +631,14 @@ function renderFallback(t) {
   // Мягкую подпись здесь не показываем: пользователь и так видит видеослой,
   // и «подождите» поверх него только мешает. Факты (readyState, ширина) —
   // когда бюджет догона исчерпан и готовой картинки нет совсем.
-  // 12 попыток по 200 мс: к этому моменту пользователь уже ~3.6 с смотрит в
-  // чёрный экран. Дальше ждать бессмысленно — показываем факты.
-  if (directRetries >= 12) showFrameHint(true, v, 'state');
-  if (directRetries < 12 && !state.playing) {
+  // Диагностику показываем рано — пользователь не должен полминуты смотреть в
+  // чёрный экран без объяснения. НО догон из-за этого не прекращаем: кадр может
+  // прийти позже, и тогда превью обязано вернуться на холст, иначе переходы и
+  // наложение останутся выключенными до конца сессии. Прежняя правка связывала
+  // порог диагностики с остановкой догона — и поздний кадр уже не возвращал
+  // превью.
+  if (directRetries >= 6) showFrameHint(true, v, 'state');
+  if (directRetries < 60 && !state.playing) {
     setTimeout(() => { if (directVideo) renderFallback(lastRenderT); }, 200);
   }
 }
@@ -631,8 +688,25 @@ export function renderFrame(t) {
 
   const needFrame = active.length > 0 && !drewFrame;
   if (needFrame) {
-    if (frameRetries >= 6) {
-      // ~1.2 с догона не помогли. Холст не получает кадр — показываем сам
+    // ~0.4 с догона не хватило. Прежде чем показывать элемент на сцене,
+    // пробуем главное: выбросить заклинивший элемент и создать свежий — тем
+    // самым рецептом, которым пробник в media.js достаёт миниатюру. Без этой
+    // замены один застрявший элемент держит чёрную сцену до конца сессии.
+    if (frameRetries >= 2 && !recycled) {
+      recycled = true;
+      recycleClipVideos(active);
+      // Сцена могла быть в аварийном режиме — возвращаем холст: свежий элемент
+      // снова скрытый, и drawCover снова может нарисовать его.
+      if (directVideo) clearFallback();
+      scheduleFrameRetry(active);
+      showFrameHint(true, null, 'wait');
+      return;
+    }
+    // Ждать шесть попыток (~1.2 с) значит полторы секунды показывать чёрный
+    // экран. Нарисованный элемент браузер декодирует всегда — значит на сцену
+    // его надо ставить быстро, а не после долгих уговоров.
+    if (frameRetries >= 4) {
+      // Догон не помог. Холст не получает кадр — показываем сам
       // <video>. Холст прячем: иначе два элемента дерутся за одно место.
       directVideo = true;
       if (canvas) canvas.style.display = 'none';
@@ -641,8 +715,11 @@ export function renderFrame(t) {
       return;
     }
     scheduleFrameRetry(active);
+    // «Подождите» — только на первую треть секунды. Дальше подпись обязана
+    // называть числа (readyState, ширина): без них «кадр не декодировался»
+    // нечем починить, и пользователь может только сообщить «не работает».
     showFrameHint(needFrame, active[0] ? videoFor(active[0].clip) : null,
-      frameRetries >= 25 ? 'state' : 'wait');
+      frameRetries >= 3 ? 'state' : 'wait');
   } else {
     frameRetries = 0;
     if (directVideo) {
