@@ -38,6 +38,7 @@ export class FakeAudioContext {
     return { length: len, sampleRate: sr, numberOfChannels: ch, duration: len / sr, copyToChannel() {} };
   }
   createMediaStreamDestination() { return { stream: { getAudioTracks: () => [] } }; }
+  createMediaElementSource(el) { return { mediaElement: el, connect() {}, disconnect() {} }; }
   resume() { this.state = 'running'; return Promise.resolve(); }
   decodeAudioData() { return Promise.resolve(FakeAudioContext.nextDecode); }
 }

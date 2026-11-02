@@ -286,6 +286,56 @@ test('видео скрыто непрозрачностью, а не display:no
   assert.match(v.style.cssText, /pointer-events:\s*none/, 'скрытое видео не должно ловить клики');
 });
 
+test('на паузе элемент клипа не вкладывается в незапущенный контекст звука', () => {
+  // Регрессия из ветки звука клипа: разбор звука создаёт аудио-контекст при
+  // импорте, и он остаётся зависшим (жест пользователя к тому времени уже не в
+  // цепочке вызовов). audioChain вкладывал в него элемент — после этого Chrome
+  // считает элемент неиграющим: seek не доходит до конца, seeked не приходит,
+  // readyState застревает на 1, сцена чёрная. Элемент при этом перестаёт быть
+  // заглушённым, и автополитика блокирует тот самый play(), которым дёргается
+  // декодер. До появления разбора звука этот путь не включался: контекста на
+  // паузе ещё не существовало.
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  // readyState обязан быть 1+: ниже audioChain выходит раньше проверки
+  // контекста, и тест проходил бы по неверной причине
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 1 });
+  const actx = player.ensureAudio();
+  assert.ok(actx, 'контекст звука не поднялся');
+  const prev = actx.state;
+  actx.state = 'suspended';
+  try {
+    player.renderFrame(0);
+    assert.equal(clip._gain, undefined,
+      'на паузе элемент не должен вкладываться в зависший контекст');
+    assert.equal(v.muted, true,
+      'пока контекст не запущен, элемент обязан остаться заглушённым');
+  } finally {
+    actx.state = prev;
+    delete clip._gain;
+    delete clip._gate;
+  }
+});
+
+test('при запущенном контексте цепочка звука строится как обычно', () => {
+  // Обратная сторона той же проверки: guarding не должен отнимать у клипа
+  // оригинальный звук, когда звук реально идёт.
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 1 });
+  const actx = player.ensureAudio();
+  actx.state = 'running';
+  try {
+    player.renderFrame(0);
+    assert.ok(clip._gain, 'цепочка не построилась — оригинального звука не будет');
+    assert.equal(v.muted, false, 'звук должен идти через граф, а не напрямую');
+  } finally {
+    actx.state = 'running';
+    delete clip._gain;
+    delete clip._gate;
+  }
+});
+
 test('видео создаётся по рецепту пробника, который в браузере работает', () => {
   // Пробник в media.js делает миниатюру клипа, и она РАБОТАЕТ у пользователя:
   // на таймлайне виден живой кадр. Значит этот рецепт браузер принимает.

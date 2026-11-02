@@ -62,13 +62,21 @@ export function audioContext() {
 }
 
 export function resumeAudio() {
-  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  if (audioCtx && audioCtx.state === 'suspended') return audioCtx.resume();
+  return Promise.resolve();
 }
 
 /** Подключает звук клипа к мастер-шине (один раз на клип). */
 function audioChain(clip) {
   const actx = ensureAudio();
-  if (!actx || !clip._video) return null;
+  // Элемент, вложенный в НЕЗАПУЩЕННЫЙ контекст звука, Chrome считает
+  // неиграющим: seek не доходит до конца, seeked не приходит, readyState
+  // застревает на 1 — сцена чёрная. Хуже того, элемент перестаёт быть
+  // заглушённым, и автополитика начинает блокировать тот самый play(), которым
+  // толкается декодер. До появления разбора звука клипа этот путь не включался:
+  // контекста на паузе ещё не существовало и audioChain выходил сразу.
+  // Маршрут создаём, когда звук реально нужен — при «Пуске» контекст оживает.
+  if (!actx || actx.state !== 'running' || !clip._video) return null;
   if (clip._gain) return clip._gain;
   if (clip._video.readyState < 1) {
     clip._video.addEventListener('loadeddata', () => audioChain(clip), { once: true });
@@ -682,8 +690,20 @@ export function play() {
   if (total <= 0) return;
   if (state.time >= total - 0.01) seek(0);
   ensureAudio();
-  resumeAudio();
   state.playing = true;
+  // Контекст оживает асинхронно, а цепочка строится только для запущенного —
+  // иначе элемент опять ушёл бы в чёрный экран. Достраиваем, как только звук
+  // пошёл: без этого при «Пуске» было бы видео без оригинального звука.
+  resumeAudio().then(() => {
+    if (!state.playing) return;
+    for (const it of computeLayout()) {
+      if (state.time < it.start || state.time >= it.end) continue;
+      const clip = it.clip;
+      if (!clip._video) continue;
+      audioChain(clip);
+      updateVideoAudioGate(clip, state.time - it.start + clip.in);
+    }
+  });
   clockBase = state.time;
   clockStart = performance.now();
   lastFrameT = state.time;
