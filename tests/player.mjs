@@ -405,8 +405,33 @@ test('placeVideo добивает seek, если позиция та же, а к
   state.state.time = 0;
   player.renderFrame(0);
   assert.ok(seen.includes(0.001),
-    `без увода на миллисекунду seek остается вымышленным (присвоения: ${seen})`);
-  assert.equal(seen[seen.length - 1], 0, 'конечная позиция должна быть запрошенной');
+    'без увода на миллисекунду seek остается вымышленным (присвоения: ' + seen + ')');
+  // Увод нельзя отменять второй строкой в той же задаче: браузер сворачивает
+  // начавшийся seek, видит элемент уже на цели и данных не запрашивает —
+  // readyState навсегда 1, сцена чёрная. Ровно это показывала диагностика.
+  assert.equal(seen[seen.length - 1], 0.001,
+    'увод должен остаться последним присваиванием, иначе seek отменяется');
+});
+
+test('когда данные пришли, позиция возвращается точной', () => {
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  let ct = 0;
+  const seen = [];
+  Object.defineProperty(v, 'currentTime', {
+    configurable: true,
+    get: () => ct,
+    set: (x) => { seen.push(x); ct = x; },
+  });
+  let rs = 1;
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => rs });
+  state.state.time = 0;
+  player.renderFrame(0);
+  assert.equal(seen[seen.length - 1], 0.001, 'сначала увод');
+
+  rs = 2;   // данные наконец пришли
+  v.dispatchEvent(new Event('seeked'));
+  assert.equal(ct, 0, 'миллисекунда увода убрана — позиция снова точная');
 });
 
 test('как только известны метаданные, кадр перерисовывается', () => {
