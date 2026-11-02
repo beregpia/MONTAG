@@ -1,6 +1,10 @@
-/* Проверка FFT и детектора событий на синтетике (без DOM). */
+/* Проверка FFT, детектора событий и слоя размещения на синтетике (без DOM). */
 import { fft, magnitudeSpectrum } from '../js/fft.js';
 import { detectOnsets, mixToMono } from '../js/onset.js';
+import {
+  placementsInFrame, currentPreviewRow, setPlacements, clearPlacements,
+  nudgePlacement, removePlacement,
+} from '../js/state.js';
 
 let fails = 0;
 const check = (name, cond, extra = '') => {
@@ -112,5 +116,70 @@ check('Детект: тишина не даёт событий', detectOnsets(ne
   check('mixToMono усредняет каналы', Math.abs(mono[0] - 0.5) < 1e-6 && Math.abs(mono[2] + 0.5) < 1e-6, mono.join(','));
 }
 
-console.log(fails ? `\nПРОВАЛОВ: ${fails}` : '\nЯдро (FFT + детектор) работает');
+
+/* ---------- слой размещения: что звучит в каждом кадре ---------- */
+/* дельта кадра в приложении ~1/25 с, поэтому и в тестах так же */
+const FR = 1 / 25;
+{
+  const ps = [{ time: 1.0 }, { time: 2.0 }, { time: 3.0 }, { time: 4.0 }];
+
+  check('за кадр звучит только пересечённый дубль',
+    placementsInFrame(ps, 2 - FR, 2).join() === '1');
+  check('дубль ровно на границе кадра звучит',
+    placementsInFrame(ps, 1.0 - FR, 1.0).join() === '0');
+  check('дубль в начале кадра не считается дважды',
+    placementsInFrame(ps, 2, 2 + FR).length === 0);
+  check('первый кадр после «Пуск» включает левую границу',
+    placementsInFrame(ps, 2, 2 + FR, true).join() === '1');
+  check('левая граница включается только там, где просят',
+    placementsInFrame(ps, 2, 2 + FR).length === 0);
+  check('два дубля внутри одного кадра звучат оба',
+    placementsInFrame([{ time: 2.0 }, { time: 2.02 }, { time: 5 }], 2 - FR, 2 + FR).join() === '0,1');
+  check('уже звучавший дубль не повторяется',
+    placementsInFrame(ps, 2 - FR, 2, false, new Set([1])).length === 0);
+  check('перескок playhead не сыгрывает всё подряд',
+    placementsInFrame(ps, 0.5, 30).length === 0);
+  check('обратный перескок тоже не сыгрывает',
+    placementsInFrame(ps, 30, 0.5).length === 0);
+  check('пустой слой не ломается', placementsInFrame([], 0, 1).length === 0);
+
+  check('строка «звучит сейчас» — последнее прошедшее размещение',
+    currentPreviewRow(ps, 2.5) === 1 && currentPreviewRow(ps, 0.5) === -1
+    && currentPreviewRow(ps, 99) === 3);
+  check('до первого дубля подсвечивать нечего', currentPreviewRow(ps, 0.1) === -1);
+  check('пустое размещение не ломает подсветку', currentPreviewRow([], 5) === -1);
+}
+
+/* ---------- слой размещения: замена и правка ---------- */
+{
+  setPlacements([
+    { id: 'a', time: 1, file: 'x.wav', cutFrom: 0, cutTo: 0.3 },
+    { id: 'b', time: 2, file: 'y.wav', cutFrom: 0, cutTo: 0.3 },
+  ]);
+  const st = (await import('../js/state.js')).state;
+  check('слой размещения заполняется', st.placements.length === 2);
+  const src = [{ id: 'd', time: 1, file: 'z.wav', cutFrom: 0, cutTo: 0.3 }];
+  setPlacements(src);
+  src[0].time = 999;
+  check('setPlacements копирует, а не переиспользует объекты',
+    st.placements[0].time === 1, `в слое ${st.placements[0].time}`);
+  setPlacements([{ id: 'c', time: 5, file: 'x.wav', cutFrom: 0, cutTo: 0.3 }]);
+  check('повторное размещение заменяет слой целиком', st.placements.length === 1
+    && st.placements[0].id === 'c');
+  nudgePlacement('c', 0.04);
+  check('сдвиг размещения работает', Math.abs(st.placements[0].time - 5.04) < 1e-9);
+  nudgePlacement('c', -99);
+  check('сдвиг не уводит в минус', st.placements[0].time === 0);
+  nudgePlacement('нет такого', 1);
+  check('сдвиг несуществующего размещения молча игнорируется',
+    st.placements.length === 1 && st.placements[0].time === 0);
+  removePlacement('c');
+  check('удаление размещения', st.placements.length === 0);
+  removePlacement('c');
+  check('повторное удаление безопасно', st.placements.length === 0);
+  clearPlacements();
+  check('очистка слоя', st.placements.length === 0);
+}
+
+console.log(fails ? `\nПРОВАЛОВ: ${fails}` : '\nЯдро (FFT + детектор + слой размещения) работает');
 process.exitCode = fails ? 1 : 0;

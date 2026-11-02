@@ -29,6 +29,7 @@ const MIN_GAP = Number(arg('min-gap', 0.08));
 const SLICE = arg('slice', '');
 const HANDLES = Number(arg('handles', 0.05));
 const CATEGORY = arg('category', '');
+const PASS = arg('pass', '');
 const OUT = arg('out', 'tools/fixtures/library-index.json');
 
 if (!existsSync(TRACK)) {
@@ -215,15 +216,16 @@ if (SLICE) {
 writeFileSync(OUT, `${JSON.stringify({
   track: TRACK,
   category: CATEGORY || 'mixed',
+  pass: PASS || '',
   sampleRate: SR,
   duration: mono.length / SR,
   options: { sensitivity: SENS, minGap: MIN_GAP },
   events: events.map((e) => ({
-    id: `${e.index}`,
+    id: `${PASS || CATEGORY || 'mixed'}#${e.index}`,
     time: Number(e.time.toFixed(4)),
     timecode: fmtTC(e.time),
     category: e.category,
-    track: CATEGORY || 'mixed',
+    track: PASS || CATEGORY || 'mixed',
     foot: e.foot || null,
     duration: Number(e.duration.toFixed(4)),
     peak: Number(e.peak.toFixed(4)),

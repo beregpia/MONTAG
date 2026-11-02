@@ -26,6 +26,15 @@ if (html) {
   check('в бандле нет module-импортов', !/^\s*import\s+.*from\s+['"]\.\.?\//m.test(html));
   check('в бандле нет ссылок на js/*.js', !/["']js\/[a-z-]+\.js["']/.test(html));
   check('в бандле нет ссылок на css/style.css', !/css\/style\.css/.test(html));
+  // Главное: в файле не должно остаться исходных ссылок вообще, в любом виде.
+  // Раньше строка замены в сборщике трактовала $` и $' из минифицированного
+  // кода как ссылки на части index.html и вставляла исходный тег <script>
+  // в середину бандла — сборка при этом «успешно» писалась.
+  check('в файле нет src="js/main.js"', !/src\s*=\s*["']?js\/main\.js/.test(html));
+  check('в файле нет href="css/style.css"', !/href\s*=\s*["']?css\/style\.css/.test(html));
+  check('в файле ровно один тег <script>', (html.match(/<script/gi) || []).length === 1,
+    `тегов ${(html.match(/<script/gi) || []).length}`);
+  check('в файле ровно один <style>', (html.match(/<style/gi) || []).length === 1);
   check('размер разумный (< 512 КБ)', html.length < 512 * 1024, `${Math.round(html.length / 1024)} КБ`);
 
   /* ---------- запуск как обычной страницы ---------- */

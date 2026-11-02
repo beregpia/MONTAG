@@ -2,6 +2,7 @@
 
 import { state, uid, EV, bus } from './state.js';
 import { toast } from './ui.js';
+import * as player from './player.js';
 
 export let selectedMediaId = null;
 
@@ -56,6 +57,13 @@ export async function importFiles(fileList) {
     state.media.push(...items);
     bus.emit(EV.MEDIA);
     toast('Добавлено в медиатеку. Теперь добавьте на таймлайн — кнопка «На таймлайн» или двойной клик по файлу.');
+    // Звук клипа разбираем не в тот же миг: чтение файла и декодирование
+    // дорожки тяжёлые, и в первую секунду они отнимают ресурсы у того самого
+    // декодера, который должен отдать первый кадр на сцену. Ошибка не fatal —
+    // у файла может не быть звуковой дорожки, и это нормально.
+    setTimeout(() => {
+      player.analyzeClipAudio().catch(() => { /* текст ошибки уже в состоянии */ });
+    }, 1200);
   }
   return items;
 }
@@ -66,6 +74,7 @@ export function appendAllToTimeline() {
     toast('Медиатека пуста — сначала импортируйте видео', { type: 'error' });
     return 0;
   }
+  const wasEmpty = state.clips.length === 0;
   let added = 0;
   for (const media of state.media) {
     state.clips.push({
@@ -80,6 +89,8 @@ export function appendAllToTimeline() {
     added++;
   }
   bus.emit(EV.CLIPS);
+  // первый клип задаёт пропорции холста, чтобы кадр не обрезался
+  if (wasEmpty && added) player.adoptResolution(state.media[0]);
   if (added) toast(`На таймлайн добавлено клипов: ${added}`);
   return added;
 }
@@ -90,10 +101,20 @@ function loadMedia(file) {
     const probe = document.createElement('video');
     probe.preload = 'metadata';
     probe.muted = true;
+    probe.playsInline = true;
+    // Chrome и Edge не декодируют кадры для <video>, которого нет в документе.
+    // Для метаданных это чаще всего срабатывает и так, но makeThumb ниже делает
+    // seek и drawImage — на отсоединённом элементе кадр может не собраться, и
+    // миниатюра клипа остаётся чёрной. Держим пробник в том же скрытом
+    // приёмнике, что и плеерные видео: именно opacity, а не display:none.
+    probe.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;'
+      + 'opacity:0;pointer-events:none;';
+    (document.getElementById('video-sink') || document.body).appendChild(probe);
     probe.src = url;
 
     const fail = (msg) => {
       probe.removeAttribute('src');
+      probe.remove();
       URL.revokeObjectURL(url);
       reject(new Error(msg));
     };
@@ -137,6 +158,7 @@ function loadMedia(file) {
       };
       item.thumb = await makeThumb(probe);
       probe.removeAttribute('src');
+      probe.remove();
       resolve(item);
     });
   });

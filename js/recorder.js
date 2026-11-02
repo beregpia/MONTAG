@@ -33,6 +33,11 @@ export async function exportMontage({ onProgress } = {}) {
   }
 
   const canvas = document.getElementById('canvas');
+  if (player.canvasBlocked()) {
+    toast('Экспорт картинки недоступен: браузер не отдал 2D-контекст холста. ' +
+      'Экспорт в SMF/CSV/JSON работает, для видео откройте MONTAG.bat.', { type: 'error', timeout: 10000 });
+    return null;
+  }
   const fps = state.settings.fps;
   const stream = canvas.captureStream(fps);
 

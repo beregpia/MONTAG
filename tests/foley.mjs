@@ -168,4 +168,91 @@ check('учтён сдвиг offset у размещённого события',
   parsed2.markers.some((m) => Math.abs(m.time - (nudged.time + (nudged.offset ?? 0))) < 0.002),
   parsed2.markers.map((m) => m.time.toFixed(3)).join(', '));
 
+
+/* ---- 6. размещение движка звучит при обычном воспроизведении ---- */
+{
+  const bank = await import(new URL('audio-bank.js', BASE).href);
+  bank.putTrack('steps 02.L.wav', { data: signal, sampleRate: SR });
+  state.setPlacements([
+    { id: 'p1', time: 1.0, duration: 0.3, category: 'steps', source: 'steps 02.L.wav',
+      file: 'steps 02.L.wav', cutFrom: 0.5, cutTo: 0.8 },
+    { id: 'p2', time: 3.0, duration: 0.3, category: 'steps', source: 'steps 02.L.wav',
+      file: 'steps 02.L.wav', cutFrom: 2.0, cutTo: 2.3 },
+  ]);
+  SOURCE_STARTS.length = 0;
+  state.state.playing = true;
+  foley.tick(0.98, 1.02);
+  check('размещение звучит при обычном воспроизведении', SOURCE_STARTS.length === 1,
+    `запусков ${SOURCE_STARTS.length}`);
+  foley.tick(1.02, 1.04);
+  check('тот же дубль дважды не звучит', SOURCE_STARTS.length === 1);
+  foley.tick(2.98, 3.02);
+  check('следующий дубль звучит в своё время', SOURCE_STARTS.length === 2);
+  SOURCE_STARTS.length = 0;
+  foley.tick(0.98, 30);
+  check('перескок playhead не сыгрывает все дубли подряд', SOURCE_STARTS.length === 0);
+  state.state.playing = false;
+  foley.tick(0.98, 1.02);
+  check('на паузе размещение не звучит', SOURCE_STARTS.length === 0);
+
+  // клип на таймлайне прослушивается по клику
+  SOURCE_STARTS.length = 0;
+  foley.auditionPlacement(state.state.placements[0]);
+  check('клик по клипу прослушивает дубль', SOURCE_STARTS.length === 1);
+  bank.clearBank();
+  foley.auditionPlacement(state.state.placements[0]);
+  check('без дорожки в банке клик молча ничего не делает', SOURCE_STARTS.length === 1);
+  state.clearPlacements();
+}
+
+/* ---------- разнообразие дублей и звуки без картинки ---------- */
+// Индексатор отдаёт события с порядковым номером `index`, а не `id`. Из-за этого
+// все дубли получали id === undefined, штраф за повтор был одинаков для всех, и
+// каждый шаг получал один и тот же звук: 4 события на картинке давали 4
+// одинаковых дубля из 6. Замер: до правки 1 уникальный из 6, после — 4 из 6.
+check('разные шаги получают разные дубли, даже без id у звуков', () => {
+  const track = { name: 'steps 02.L.wav', category: 'steps', pass: '02', duration: 20, events: [
+    { time: 0.5, duration: 0.2, peak: 0.9, strength: 0.8 },
+    { time: 1.2, duration: 0.2, peak: 0.8, strength: 0.7 },
+    { time: 2.0, duration: 0.2, peak: 0.9, strength: 0.8 },
+    { time: 2.7, duration: 0.2, peak: 0.85, strength: 0.75 },
+    { time: 3.4, duration: 0.2, peak: 0.9, strength: 0.8 },
+    { time: 4.1, duration: 0.2, peak: 0.8, strength: 0.7 },
+  ] };
+  const events = [2.0, 2.7, 3.4, 4.1].map((t, i) => ({
+    id: 'e' + i, time: t, frame: Math.round(t * 25), category: 'steps',
+    strength: 0.8, duration: 0.2, region: { x: 0.3, y: 0.5, w: 0.2, h: 0.3 },
+    source: track.name,
+  }));
+  const library = track.events.map((e) => ({ ...e, track: '02', file: track.name, category: 'steps', source: track.name }));
+  const r = placeEvents(events, library, { fps: 25 });
+  const used = new Set(r.placements.filter((p) => p.audio).map((p) => p.audio.cutFrom));
+  check(used.size === r.placements.length, `уникальных дублей ${used.size} на ${r.placements.length} шагов — шаги заедают один звук`);
+});
+
+check('сводка считает звуки дорожек без картинки', () => {
+  const library = [0.5, 1.2, 2.0, 2.7, 3.4, 4.1].map((t) => ({
+    time: t, duration: 0.2, peak: 0.9, category: 'steps', file: 'a.wav', source: 'a.wav',
+  }));
+  const events = [2.0, 2.7, 3.4, 4.1].map((t, i) => ({ id: 'e' + i, time: t, frame: t * 25, category: 'steps', strength: 0.8 }));
+  const r = placeEvents(events, library, { fps: 25 });
+  check(r.summary.libraryTotal === 6, `всего звуков ${r.summary.libraryTotal}`);
+  check(r.summary.libraryUnused === 2, `без картинки ${r.summary.libraryUnused} — их нельзя молча терять`);
+});
+
+check('звуки без картинки достаются по времени записи со смещением', () => {
+  const library = [0.5, 1.2, 2.0, 2.7, 3.4, 4.1].map((t) => ({
+    time: t, duration: 0.2, peak: 0.9, category: 'steps', file: 'a.wav', source: 'a.wav',
+  }));
+  const events = [2.0, 2.7, 3.4, 4.1].map((t, i) => ({ id: 'e' + i, time: t, frame: t * 25, category: 'steps', strength: 0.8 }));
+  const r = placeEvents(events, library, { fps: 25 });
+  const lo = placeLeftovers(r.placements, library, { fps: 25, offset: 0.3 });
+  check(lo.added === 2, `добавлено ${lo.added} вместо 2`);
+  const times = lo.placements.map((p) => p.time);
+  check(times[0] === 0.8 && times[1] === 1.5, `смещение не применилось: ${times.join(', ')}`);
+  check(lo.placements.filter((p) => p.review).length === 2, 'остатки должны быть помечены на проверку');
+  check(lo.placements.length === 6, `итого ${lo.placements.length} размещений вместо 6`);
+});
+
+
 process.exitCode = done('Foley-подсистема') ? 0 : 1;

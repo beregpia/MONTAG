@@ -4,3 +4,6 @@ node_modules/
 
 # сгенерированные фикстуры эксперимента (создаются npm run fixtures)
 tools/fixtures/
+
+# сборка Windows-приложения (создаётся npm run build:win)
+dist/

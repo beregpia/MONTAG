@@ -28,8 +28,16 @@ html, body {
 
 body {
   display: grid;
+  /* Колонка задана явно через minmax(0, 1fr). Без этого неявная
+   * grid-колонка растягивалась под самое широкое содержимое — а самое
+   * широкое это таймлайн при масштабе. Страница получала горизонтальную
+   * прокрутку, и вправо уезжали ВСЁ сразу — и картинка, и кнопки
+   * верхней панели. Вот откуда «улетает и не возвращается».
+   */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100vh;
+  overflow-x: hidden;
 }
 
 h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 600; }
@@ -82,6 +90,10 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   padding: 10px 16px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--line);
+  /* панели-«ящики» стоят на top: 49px, а панель выше — иначе они
+     срезают нижний край кнопок верхней панели */
+  position: relative;
+  z-index: 60;
 }
 .brand { display: flex; align-items: center; gap: 10px; }
 .logo {
@@ -258,12 +270,39 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .inspector-body .btn { width: 100%; margin-top: 16px; }
 
 /* ---------- таймлайн ---------- */
+/* Приёмник <video> клипов. Нужен, потому что Chrome и Edge не декодируют кадры
+   для видео вне документа: drawCover уходит при readyState < 2, и на паузе
+   сцена оставалась чёрной. Размер нулевой, но не display:none — он
+   останавливает декодирование. Сами элементы ставят opacity: 0. */
+#video-sink {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+  /* БЕЗ z-index: -1. С ним приёмник уходит за фон страницы, и Chrome считает
+     элемент ненарисованным — декодирование не начинается, кадра нет. */
+}
+
 .timeline-wrap {
   border-top: 1px solid var(--line);
   background: var(--bg-panel);
   padding: 8px 12px 12px;
+  /* min-width: 0 — чтобы широкое содержимое таймлайна не растягивало ряд */
+  min-width: 0;
+  overflow: hidden;
 }
-.timeline-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.timeline-toolbar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 8px;
+}
+/* Кнопки таймлайна не должны уезжать за край окна: на узком экране ряд
+ * переносится на вторую строку, а не обрезается. */
+.timeline-toolbar > * { flex: 0 0 auto; }
+.timeline-toolbar > .spacer { flex: 1 1 auto; min-width: 8px; }
+.timeline-toolbar .btn.tiny { white-space: nowrap; }
 .timeline {
   position: relative;
   overflow-x: auto;
@@ -352,6 +391,44 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
   display: grid; place-items: center;
   font-size: 11px; color: #565d6b;
 }
+
+/* развёрнутый вид: строка на каждую дорожку-персонажа */
+.foley-track.rows { height: auto; }
+.foley-row {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 34px;
+  border-top: 1px solid #191c23;
+}
+.foley-row:first-child { border-top: 0; }
+/* Якорь нулевой ширины: подпись не сдвигает полосу, иначе клипы уезжают
+   относительно playhead на её ширину. Sticky держит подпись у левого края
+   при горизонтальной прокрутке. */
+.foley-row-anchor {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  flex: 0 0 0;
+  width: 0;
+  height: 100%;
+}
+.foley-row-label {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 96px;
+  padding: 0 8px 0 6px;
+  font-size: 10px;
+  line-height: 33px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(90deg, #0d0f13 72%, rgba(13, 15, 19, 0));
+  border-right: 1px solid #191c23;
+}
+.foley-lane { position: relative; flex: 1 1 auto; min-width: 0; }
+
 .foley-mark {
   position: absolute;
   top: 5px;
@@ -370,6 +447,165 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 .foley-mark:hover { border-color: var(--accent); transform: translateX(-50%) scale(1.12); }
 .foley-mark.selected { border-color: var(--accent); background: var(--accent-soft); }
 .foley-mark.detected { border-style: dashed; }
+
+/* клип размещения: ширина = длительность дубля */
+.foley-clip {
+  position: absolute;
+  top: 3px;
+  height: 28px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #1b2740, #121a29);
+  border: 1px solid #3d567c;
+  cursor: pointer;
+  overflow: hidden;
+}
+.foley-clip:hover { border-color: var(--accent-2); }
+.foley-clip.review { border-color: #7a5a2a; background: linear-gradient(180deg, #2a2216, #1b1610); }
+/* Волформа занимает клип целиком, кроме полосы подписи: её надо видеть,
+   иначе о длине и силе дубля судить нечем. */
+.foley-wave {
+  position: absolute;
+  left: 1px; right: 1px; top: 1px; bottom: 11px;
+  opacity: .95;
+}
+.foley-wave svg { display: block; width: 100%; height: 100%; }
+/* Волноформа как в Pro Tools: плотная заливка без обводки и видимая ось нуля.
+ * Была полупрозрачной с обводкой — на плотном фоне клипа это сливалось в пятно. */
+.foley-wave path { fill: #4f83c4; stroke: none; }
+.foley-wave .axis { stroke: #23324a; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.foley-clip.review .foley-wave path { fill: #b98a45; }
+.foley-clip.review .foley-wave .axis { stroke: #4a3a22; }
+.foley-clip-label {
+  position: absolute; left: 3px; right: 3px; bottom: 1px;
+  font-size: 9px; line-height: 9px;
+  color: #cfe0ff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.foley-clip.review .foley-clip-label { color: #f0d9a8; }
+
+/* ---- левая колонка заголовков дорожек, как в NLE ----
+ * Прилипает к левому краю при прокрутке и не накладывается на волноформу:
+ * содержимое дорожки начинается после неё, поэтому все координаты внутри
+ * дорожек сдвинуты на GUTTER (152 px). Раньше подпись была абсолютным
+ * наложением поверх волноформы и закрывала её первые ~130 px. */
+.tl-gutter {
+  flex: 0 0 152px;
+  width: 152px;
+  position: sticky;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 6px;
+  background: #0d0f13;
+  border-right: 1px solid var(--line);
+  box-sizing: border-box;
+}
+.tl-gutter-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tl-gutter-tag {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: #4a5160;
+  border: 1px solid #23272f;
+  border-radius: 3px;
+  padding: 0 3px;
+}
+/* высоту колонкам задаёт строка: flex-элемент растягивается по ней сам,
+ * поэтому явных height здесь нет — иначе колонка короче дорожки и видна
+ * щель между ними */
+/* у линейки и видеодорожки свою границу даёт сама строка — иначе она удваивается */
+.tl-gutter-foley { border-bottom: 1px solid #12151b; }
+.tl-body { position: relative; flex: 0 0 auto; min-width: 0; }
+.ruler, .track, .foley-row { display: flex; }
+.track { position: relative; }
+
+/* мьют, соло и громкость — внутри колонки заголовка */
+.foley-mix-btn {
+  flex: 0 0 auto;
+  width: 16px; height: 16px; padding: 0;
+  font-size: 9px; line-height: 1; font-weight: 700;
+  color: #6f7787; background: #14171d;
+  border: 1px solid #23272f; border-radius: 3px;
+  cursor: pointer;
+}
+.foley-mix-btn:hover { color: #cdd4e0; border-color: #3a4150; }
+.foley-mix-btn.on { color: #0b0d11; background: var(--accent-2); border-color: var(--accent-2); }
+.foley-vol {
+  flex: 0 0 44px;
+  width: 44px; height: 14px;
+  margin: 0;
+  accent-color: var(--accent-2);
+  cursor: pointer;
+}
+/* заглушенная дорожка видна, но потухшая — как в любой DAW */
+.foley-row.silent .tl-gutter-name { color: #4a5160; }
+.foley-row.silent .foley-wave path { fill: rgba(120, 132, 152, .25); stroke: #5b6472; }
+
+/* исходные дорожки: своя шкала, поэтому визуально отделены */
+.foley-row.src {
+  height: 22px;
+  background: #0b0d11;
+  border-bottom: 1px solid #12151b;
+}
+/* Свёрнутые исходники не должны раздвигать окно: строка уже клипа, а волформа
+ * исходника читается и на такой высоте. */
+.foley-row.src .foley-row-anchor { height: 22px; }
+.foley-row.src .foley-row-label { font-size: 10px; }
+.foley-row.src .foley-row-label { color: #6f7787; }
+.foley-src-head {
+  display: flex; align-items: baseline; gap: 8px;
+  height: 15px; padding: 0 6px;
+  font-size: 10px; color: #6f7787;
+  background: #0a0c10;
+  border-top: 1px solid #191c23;
+  border-bottom: 1px solid #191c23;
+}
+.foley-src-wave {
+  position: absolute; inset: 2px 0 2px 0;
+  opacity: .5;
+}
+.foley-src-wave svg { display: block; width: 100%; height: 100%; }
+.foley-src-wave path { fill: #46536b; stroke: none; }
+.foley-src-wave .axis { stroke: #232a38; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.foley-src-tick {
+  position: absolute; top: 1px; bottom: 1px; width: 2px;
+  background: #556072;
+  cursor: pointer;
+}
+.foley-src-tick:hover { background: var(--accent-2); width: 3px; }
+
+/* Оригинальный шаг из звука клипа. Цвет — результат сравнения с расстановкой:
+   зелёная совпала, жёлтая фоли смещён, красная шаг пропущен совсем. Цвет
+   читается с первого взгляда, поэтому отметки шире исходных. */
+.orig-step {
+  position: absolute; top: 1px; bottom: 1px; width: 3px;
+  background: #556072;
+  cursor: pointer;
+}
+.orig-step:hover { background: var(--accent-2); width: 4px; }
+.orig-step.ok { background: #4f9d69; }
+.orig-step.early, .orig-step.late { background: #b98a45; }
+.orig-step.miss { background: var(--danger); }
+.orig-step.ok:hover, .orig-step.early:hover, .orig-step.late:hover,
+.orig-step.miss:hover { background: var(--accent-2); }
+
+/* свёрнутый ряд */
+.foley-collapsed {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 8px;
+}
+.foley-collapsed-title { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+.foley-collapsed .spacer { flex: 1; }
 
 /* ---------- drawer Foley ---------- */
 .foley-drawer {
@@ -431,4 +667,75 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 @media (max-width: 1100px) {
   .layout { grid-template-columns: 210px minmax(0, 1fr) 250px; }
   .brand-tag { display: none; }
+}
+
+/* ---------- панель «Движок» ---------- */
+.engine-body h3 { margin: 14px 0 6px; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted, #9aa4b2); }
+.engine-body .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
+.engine-body .input { background: #10131a; border: 1px solid #262c38; color: #e6e9ef; border-radius: 6px; padding: 6px 8px; font: inherit; font-size: 13px; min-width: 120px; }
+.engine-body .input.tiny { width: 74px; min-width: 74px; }
+.mini-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+.mini-table th { text-align: left; color: #9aa4b2; font-weight: 500; padding: 4px 6px; border-bottom: 1px solid #262c38; white-space: nowrap; }
+.mini-table td { padding: 4px 6px; border-bottom: 1px solid #1b2029; white-space: nowrap; }
+.mini-table tr:hover td { background: #151a23; }
+/* строка размещения, которая звучит прямо сейчас в предпросмотре */
+.mini-table tr.preview-now td { background: var(--accent-soft); color: var(--text); }
+.mini-table tr.preview-now td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+/* дорожки фоли на таймлайне: клип, который звучит прямо сейчас */
+.foley-clip.playing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+.foley-clip.playing .foley-clip-label { color: #fff; }
+.mini-list { max-height: 220px; overflow: auto; border: 1px solid #262c38; border-radius: 8px; }
+.mini-row { display: flex; gap: 10px; align-items: center; padding: 4px 8px; font-size: 12px; border-bottom: 1px solid #1b2029; }
+.mini-row:last-child { border-bottom: none; }
+.mini-row .mono, .mini-table .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.warn { color: #ffb454; }
+
+/* ---------- предупреждение о неработающем холсте ---------- */
+.canvas-warn {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #6b4b12;
+  border-radius: var(--radius);
+  background: rgba(38, 28, 8, .94);
+  color: #ffd9a0;
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: left;
+  pointer-events: none;
+}
+.canvas-warn b { color: #ffbf6b; font-size: 13px; }
+.canvas-warn code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .1);
+  font-size: 11px;
+}
+.canvas-warn .btn {
+  justify-self: start;
+  margin-top: 2px;
+  pointer-events: auto;
+  font-size: 12px;
+}
+
+/* ---------- подсказка «кадр ещё не декодировался» ---------- */
+.frame-hint {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(12, 13, 16, .82);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
 }
