@@ -44,6 +44,44 @@ function scene(count, events = [], base = 30) {
   return frames;
 }
 
+test('mergeWindows: перекрывающиеся окна складываются в один участок', () => {
+  // Каденция шагов ~0.5 с, окно ±0.7 с — соседние окна лежат друг в друге.
+  // Сканировать их порознь значит зря просеивать одно и то же время.
+  const ev = [0, 0.5, 1.0, 1.5, 2.0].map((time) => ({ time }));
+  const spans = V.mergeWindows(ev, 0.3, 0.4);
+  assert.equal(spans.length, 1, `пять шагов подряд — один участок, а не ${spans.length}`);
+  assert.equal(spans[0].t0, 0, 'участок начинается с первого окна, не уходя в минус');
+  assert.equal(spans[0].t1, 2.7, 'участок доходит до конца последнего окна');
+  assert.deepEqual(spans[0].around, [0, 0.5, 1.0, 1.5, 2.0], 'все события помнятся');
+});
+
+test('mergeWindows: далёкие события остаются раздельными', () => {
+  const ev = [{ time: 0 }, { time: 5 }];
+  const spans = V.mergeWindows(ev, 0.3, 0.4);
+  assert.equal(spans.length, 2, 'разрыв в пять секунд — два участка');
+  assert.equal(spans[1].t0, 4.3, 'второй участок начинается со своего окна');
+  assert.equal(spans[0].around.length, 1);
+  assert.equal(spans[1].around.length, 1);
+});
+
+test('mergeWindows: ни одно событие не теряется и участки не пересекаются', () => {
+  const times = [];
+  for (let t = 0; t < 60; t += 0.5) times.push(t);
+  const spans = V.mergeWindows(times.map((time) => ({ time })), 0.3, 0.4);
+  const seen = spans.flatMap((s) => s.around).sort((a, b) => a - b);
+  assert.deepEqual(seen, times, 'каждое событие попало ровно в один участок');
+  for (let i = 1; i < spans.length; i++) {
+    assert.ok(spans[i].t0 > spans[i - 1].t1, `участки ${i - 1} и ${i} пересекаются`);
+  }
+  // Ради чего всё: минутный клип с шагами каждые полсекунды
+  assert.ok(spans.length < times.length / 2,
+    `складывание обязано резать проходы: ${spans.length} участков на ${times.length} событий`);
+});
+
+test('mergeWindows: пустой список не даёт участков', () => {
+  assert.deepEqual(V.mergeWindows([], 0.3, 0.4), []);
+});
+
 test('cellDiff: разница считается по каждой ячейке', () => {
   const a = new Uint8Array([10, 20, 30]);
   const b = new Uint8Array([14, 18, 30]);

@@ -197,7 +197,14 @@ async function detectMotionInClip() {
   // Без этой проверки разбор честно вернёт ноль событий, но совет будет
   // «поднимите чувствительность» — и монтажёр пойдёт искать настройку,
   // которой нет, вместо того чтобы просто дождаться кадра.
-  if (!isFinite(video.duration) || video.readyState < 2) {
+  //
+  // Признак «кадр есть» — известные размеры, а НЕ readyState >= 2. Chrome
+  // отдаёт кадр на холст уже при readyState 1 (метаданные плюс один
+  // декодированный кадр): именно на этом выросла целая правка чёрной сцены,
+  // см. research/video-frame-pitfalls.md, причина 3. Прежняя проверка
+  // отказывала детектору при живой картинке и советовала нажать «Пуск»,
+  // который ничего не меняет — пользователь видел «не находит шаги».
+  if (!isFinite(video.duration) || !video.videoWidth) {
     toast('Кадр ещё не декодировался. Нажмите «Пуск», дождитесь картинки, '
       + 'затем «🔍 Найти движение»', { type: 'warn', timeout: 9000 });
     return;
@@ -211,7 +218,13 @@ async function detectMotionInClip() {
   scanAbort = new AbortController();
   const btn = document.getElementById('engine-detect');
   const label = btn ? btn.textContent : '';
-  if (btn) btn.textContent = '⏳ разбор… 0%';
+  if (btn) {
+    btn.textContent = '⏳ разбор… 0%';
+    // Разбор идёт десятками секунд, а прервать его можно только повторным
+    // нажатием этой же кнопки — об этом надо сказать прямо, иначе кнопка
+    // выглядит мёртвой, и пользователь ждёт, не понимая что делать.
+    btn.title = 'Идёт разбор. Нажмите, чтобы отменить.';
+  }
 
   // разбор идёт через seek — на паузе, иначе позиция прыгает
   player.pause();
@@ -223,7 +236,11 @@ async function detectMotionInClip() {
       signal: scanAbort.signal,
       onProgress: (p) => {
         if (!btn) return;
-        const r = p.phase === 'refine' ? 100 + p.ratio : p.ratio * 100;
+        // Процент одинаков для обеих фаз. Раньше уточнение считало
+        // 100 + ratio, а Math.min(100, …) срезал это до ровно 100% — и вся
+        // фаза показывала застывшее «уточнение 100%», хотя разбор шёл.
+        // Выглядело как зависание, и монтажёр не понимал, ждать или отменять.
+        const r = p.ratio * 100;
         btn.textContent = `⏳ ${p.phase === 'refine' ? 'уточнение' : 'разбор'} ${Math.min(100, Math.round(r))}%`;
       },
     });
@@ -260,7 +277,10 @@ async function detectMotionInClip() {
   } finally {
     scanning = false;
     scanAbort = null;
-    if (btn) btn.textContent = label;
+    if (btn) {
+      btn.textContent = label;
+      btn.title = '';
+    }
     render();
   }
 }

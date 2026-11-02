@@ -556,14 +556,23 @@ function trackHead(file, label, count) {
  *
  * Шкала здесь СВОЯ, не таймлайна: время в записи не совпадает со временем
  * монтажа — именно поэтому расстановка и существует. Playhead по этой полосе
- * не идёт, и это не баг.
+ * не идёт, и это не баг. Сама полоса при этом выровнена с видео: колонка
+ * заголовка у неё такая же, как у всех остальных строк.
  */
 function sourceRow(t, width) {
   const w = Math.max(0, (t.duration || 0) * pps);
   const row = el('div', { class: 'foley-row src' });
-  row.append(el('div', { class: 'foley-row-anchor' },
-    el('div', { class: 'foley-row-label', title: `${t.name} · ${t.events.length} шагов` },
-      shortTrackName(t.name))));
+  // Колонка заголовка — такая же, как у всех остальных строк: .tl-gutter,
+  // 152 px. Раньше здесь был якорь нулевой ширины с подписью поверх полосы, и
+  // полоса исходной дорожки начиналась на 152 px ЛЕВЕЕ видео, линейки и
+  // размещения — «исходные дорожки должны стоять ровно с видео». Якорь имел
+  // смысл, когда у строк фоли колонки не было вовсе; теперь она есть у всех,
+  // и исходники остались единственным исключением.
+  row.append(el('div', { class: 'tl-gutter tl-gutter-foley' },
+    el('span', {
+      class: 'tl-gutter-name',
+      title: `${t.name} · ${t.events.length} шагов`,
+    }, shortTrackName(t.name))));
   const lane = el('div', { class: 'foley-lane', style: `width:${Math.max(w, 1)}px` });
   if (w > 0 && w <= width + 4) {
     const points = Math.max(24, Math.min(240, Math.round(w * 2)));
@@ -678,7 +687,10 @@ function origStepTick(t, kind, va) {
 
 /** Заголовок блока исходников — чтобы шкала не путалась с таймлайном. */
 function sourceHead() {
+  // Распорка той же ширины, что колонка дорожек: иначе описание блока
+  // начинается на 152 px левее полос, к которым относится.
   return el('div', { class: 'foley-src-head' },
+    el('div', { style: 'flex:0 0 152px;width:152px' }),
     el('span', {}, 'исходные дорожки'),
     el('span', { class: 'muted small' }, 'своя шкала времени, не таймлайн — '
       + 'клик по отметке прослушивает тейк'));

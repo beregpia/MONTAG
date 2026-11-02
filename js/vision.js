@@ -604,6 +604,44 @@ export async function scanFrames(video, opts = {}) {
  * @param {HTMLVideoElement} video
  * @param {object} opts {fps, coarseFps, gridW, gridH, at, onProgress, signal}
  */
+/**
+ * Складывает перекрывающиеся окна уточнения в непересекающиеся участки.
+ *
+ * Окно вокруг события — ±(win + pad). При каденции шагов ~0.5 с и win 0.3 с
+ * следующее окно начинается внутри предыдущего: сканировать их порознь значит
+ * зря просеивать одно и то же время десятки раз. На минутном клипе с ~120
+ * шагами это ~4200 лишних seek'ов — отсюда «долго висит на уточнении».
+ *
+ * Разбор при этом не меняется: окна для analyzeFrames режутся из отснятого
+ * участка, каждое событие анализируется своим окном, как и раньше.
+ *
+ * @param {Array<{time:number}>} events
+ * @param {number} win  радиус поиска вокруг грубого события
+ * @param {number} pad  запас на раскрутку фона
+ * @returns {Array<{t0:number,t1:number,around:number[]}>}
+ */
+export function mergeWindows(events, win, pad) {
+  const half = win + pad;
+  const sorted = events
+    .map((e) => ({ time: e.time }))
+    .sort((a, b) => a.time - b.time);
+  const out = [];
+  for (const e of sorted) {
+    const t0 = Math.max(0, e.time - half);
+    const t1 = e.time + half;
+    const last = out[out.length - 1];
+    // Пересекаются или вплотную — растягиваем последний участок. Зазор
+    // меньше кадра не стоит отдельного прохода: seek всё равно дороже.
+    if (last && t0 <= last.t1 + 1e-9) {
+      last.t1 = Math.max(last.t1, t1);
+      last.around.push(e.time);
+      continue;
+    }
+    out.push({ t0, t1, around: [e.time] });
+  }
+  return out;
+}
+
 export async function analyzeVideo(video, opts = {}) {
   const {
     fps = 25,
@@ -640,43 +678,55 @@ export async function analyzeVideo(video, opts = {}) {
   const pad = 0.4;
   const fineFrames = [];
   const fineEdges = [];
-  const spans = [];
-  for (const e of coarseRes.events) {
-    const t0 = Math.max(0, e.time - win - pad);
-    const t1 = e.time + win + pad;
+  const scans = [];
+  // Перекрывающиеся окна складываем: при каденции шагов ~0.5 с участки
+  // перекрываются почти целиком, и посекторный проход просеивал одно и то же
+  // время десятки раз. Каждый участок теперь секется один раз.
+  const spans = mergeWindows(coarseRes.events, win, pad);
+  for (let si = 0; si < spans.length; si++) {
+    const sp = spans[si];
     const r = await scanFrames(video, {
-      fps, t0, t1, gridW, gridH, signal,
+      fps, t0: sp.t0, t1: sp.t1, gridW, gridH, signal,
       onProgress: (p) => onProgress?.({
         phase: 'refine',
-        ratio: (spans.length + p) / Math.max(1, coarseRes.events.length),
+        ratio: (si + p) / Math.max(1, spans.length),
       }),
     });
-    if (r.frames.length >= 2) {
-      spans.push({
-        base: fineFrames.length, offset: r.times[0], fps, count: r.frames.length, around: e.time,
-      });
-      for (const f of r.frames) fineFrames.push(f);
-      if (r.edges?.length === r.frames.length) for (const g of r.edges) fineEdges.push(g);
-      else for (let k = 0; k < r.frames.length; k++) fineEdges.push(null);
-    }
+    if (r.frames.length < 2) continue;
+    const base = fineFrames.length;
+    for (const f of r.frames) fineFrames.push(f);
+    if (r.edges?.length === r.frames.length) for (const g of r.edges) fineEdges.push(g);
+    else for (let k = 0; k < r.frames.length; k++) fineEdges.push(null);
+    scans.push({ base, offset: r.times[0], fps, count: r.frames.length, around: sp.around });
   }
 
-  if (!spans.length) return coarseRes;
+  if (!scans.length) return coarseRes;
 
-  // разбор каждого уточнённого окна отдельно и склейка
+  // Разбор каждого события своим окном — как и раньше, только кадры берём из
+  // уже отснятого участка, а не секем заново. Границы окна попадают на сетку
+  // участка с точностью до кадра: seek стоит десятки миллисекунд, а кадр — 40 мс,
+  // поэтому точная подгонка границ дороже собственно разбора.
   const events = [];
-  for (const s of spans) {
-    const slice = fineFrames.slice(s.base, s.base + s.count);
-    const eSlice = fineEdges.slice(s.base, s.base + s.count);
-    const r = analyzeFrames(slice, s.fps, {
-      gridW, gridH, at, edges: eSlice.some((x) => x) ? eSlice : null, ...detectOpts,
-    });
-    for (const e of r.events) {
-      const t = e.time + s.offset;
-      // за пределами ±win от грубого события не берём: разогрев дан запасом,
-      // а не лицензией находить новые события в чужом окне
-      if (Math.abs(t - s.around) > win + 0.05) continue;
-      events.push({ ...e, time: t, frame: e.frame + Math.round(s.offset * s.fps) });
+  for (const s of scans) {
+    for (const around of s.around) {
+      const w0 = Math.max(0, around - win - pad);
+      const w1 = around + win + pad;
+      const i0 = Math.max(0, Math.ceil((w0 - s.offset) * s.fps));
+      const i1 = Math.min(s.count - 1, Math.floor((w1 - s.offset) * s.fps));
+      if (i1 - i0 < 2) continue;
+      const start = s.offset + i0 / s.fps;
+      const slice = fineFrames.slice(s.base + i0, s.base + i1 + 1);
+      const eSlice = fineEdges.slice(s.base + i0, s.base + i1 + 1);
+      const r = analyzeFrames(slice, s.fps, {
+        gridW, gridH, at, edges: eSlice.some((x) => x) ? eSlice : null, ...detectOpts,
+      });
+      for (const e of r.events) {
+        const t = e.time + start;
+        // за пределами ±win от грубого события не берём: разогрев дан запасом,
+        // а не лицензией находить новые события в чужом окне
+        if (Math.abs(t - around) > win + 0.05) continue;
+        events.push({ ...e, time: t, frame: e.frame + Math.round(start * s.fps) });
+      }
     }
   }
   events.sort((a, b) => a.time - b.time);

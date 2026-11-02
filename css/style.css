@@ -558,9 +558,8 @@ h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: v
 }
 /* Свёрнутые исходники не должны раздвигать окно: строка уже клипа, а волформа
  * исходника читается и на такой высоте. */
-.foley-row.src .foley-row-anchor { height: 22px; }
-.foley-row.src .foley-row-label { font-size: 10px; }
-.foley-row.src .foley-row-label { color: #6f7787; }
+/* Подписи исходных дорожек живут в общей колонке .tl-gutter, поэтому свои
+ * правила им не нужны: размер и цвет даёт .tl-gutter-name. */
 .foley-src-head {
   display: flex; align-items: baseline; gap: 8px;
   height: 15px; padding: 0 6px;

@@ -414,8 +414,25 @@ test('исходники: блок рисуется с волформой и о�
 
   const rows = document.querySelectorAll('#foley-track .foley-row.src');
   assert.equal(rows.length, 1, 'строка исходника отрисовалась');
-  assert.equal(rows[0].querySelector('.foley-row-label').textContent, 'steps 02.L',
+  assert.equal(rows[0].querySelector('.tl-gutter-name').textContent, 'steps 02.L',
     'подпись — имя дорожки без расширения');
+  // Ради чего всё: полоса исходника стоит в одной столбик с видео, линейкой и
+  // размещением. Раньше здесь был якорь нулевой ширины с подписью поверх
+  // полосы — и полоса уезжала на 152 px левее видео.
+  assert.ok(rows[0].querySelector('.tl-gutter.tl-gutter-foley'),
+    'колонка заголовка такая же, как у дорожек');
+  assert.ok(!rows[0].querySelector('.foley-row-anchor'),
+    'якоря нулевой ширины больше нет — он и сдвигал полосу');
+  // Сравнивать getBoundingClientRect в jsdom бессмысленно: все прямоугольники
+  // там нулевые, и проверка проходила бы вхолостую. Выравнивание держится на
+  // том, что ПЕРВЫЙ элемент строки — одна и та же колонка заголовка, а полоса
+  // идёт после неё. Поэтому сравниваем состав детей, а не геометрию.
+  const kids = (row) => Array.from(row.children).map((c) => c.className);
+  assert.ok(kids(rows[0])[0].includes('tl-gutter'),
+    'первый элемент строки исходника — колонка заголовка, а не сама полоса');
+  const clipRow = document.querySelector('#foley-track .foley-row:not(.src)');
+  assert.ok(kids(clipRow)[0].includes('tl-gutter'),
+    'у строки размещения та же колонка — значит полосы начинаются вместе');
   assert.ok(document.querySelector('#foley-track .foley-src-wave svg path'),
     'волформа исходной дорожки нарисована');
   assert.equal(document.querySelectorAll('#foley-track .foley-src-tick').length, 3,
@@ -703,6 +720,22 @@ test('панель инструментов таймлайна не обреза
   const css = await readFile(new URL('../css/style.css', import.meta.url), 'utf8');
   assert.match(css, /\.timeline-toolbar\s*\{[^}]*flex-wrap:\s*wrap/,
     'панель инструментов должна переноситься, иначе кнопки уезжают за край');
+});
+
+/* ---------- целостность CSS ---------- */
+test('CSS цел: незакрытый комментарий съел бы все правила после себя', async () => {
+  const css = await readFile(new URL('../css/style.css', import.meta.url), 'utf8');
+  // Правка выравнивания исходников однажды оставила комментарий незакрытым, и
+  // всё, что ниже, ушло в комментарий: правила .foley-src-head и .orig-step
+  // перестали существовать. Тесты этого не заметили, потому что CSS они не
+  // читают, а сборка на CSS не смотрит вовсе. Баланс проверяется напрямую.
+  const open = (css.match(/\/\*/g) || []).length;
+  const close = (css.match(/\*\//g) || []).length;
+  assert.equal(open, close, `комментариев открыто ${open}, закрыто ${close}`);
+  // Ради чего выравнивание: колонка заголовка одна и та же у всех строк
+  // таймлайна, и от её ширины зависит, где начинается полоса.
+  assert.match(css, /\.tl-gutter\s*\{[^}]*flex:\s*0 0 152px/,
+    'колонка заголовка — 152 px, и это общий столбик для видео и исходников');
 });
 
 /* ---------- понятно, где фоли звучит ---------- */
