@@ -289,12 +289,19 @@ test('видео скрыто непрозрачностью, а не display:no
 test('видео создаётся по рецепту пробника, который в браузере работает', () => {
   // Пробник в media.js делает миниатюру клипа, и она РАБОТАЕТ у пользователя:
   // на таймлайне виден живой кадр. Значит этот рецепт браузер принимает.
-  // Отличия, которые важно сохранить: src назначается ДО appendChild, и
-  // load() НЕ вызывается. Явный load() после src запускает алгоритм загрузки
-  // второй раз и сбрасывает элемент в readyState 0.
+  // Что важно сохранить: элемент попадает в документ ДО назначения src (у
+  // пробника именно так), и load() НЕ вызывается. Явный load() после src
+  // запускает алгоритм загрузки второй раз и сбрасывает элемент в readyState 0.
   const loads = [];
   const origLoad = window.HTMLVideoElement.prototype.load;
   window.HTMLVideoElement.prototype.load = function () { loads.push(this); };
+  const sink = document.getElementById('video-sink');
+  const order = [];
+  const origAppend = sink.appendChild.bind(sink);
+  sink.appendChild = (el) => {
+    order.push(el.src ? 'src-уже-стоит' : 'src-ещё-нет');
+    return origAppend(el);
+  };
   try {
     const clip = freshClip();
     const v = player.videoFor(clip);
@@ -302,9 +309,52 @@ test('видео создаётся по рецепту пробника, кот
     assert.equal(v.src, 'blob:fake', 'источник не назначен');
     assert.equal(v.preload, 'auto', 'без preload=auto кадр не подгружается заранее');
     assert.ok(v.parentNode, 'элемент в документе');
+    assert.deepEqual(order, ['src-ещё-нет'],
+      'элемент должен быть в документе ДО src: загрузка, начавшаяся у элемента '
+      + 'вне документа, для Chrome и Edge декодирования не обеспечивает');
   } finally {
     window.HTMLVideoElement.prototype.load = origLoad;
+    sink.appendChild = origAppend;
   }
+});
+
+test('прогрев декодера просит НЕНУЛЕВУЮ позицию', () => {
+  // Это и есть корень «в паузе нет изображения». seek на позицию 0, в которой
+  // свежий элемент уже стоит, браузер считает выполненным: события seeked не
+  // будет, декодер не запустится, readyState застрянет на 1, drawCover молча
+  // выйдет — сцена чёрная. Пробник в media.js потому и просит 0.25 с.
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  assert.equal(v.currentTime, 0, 'до метаданных позиция нулевая');
+  v.dispatchEvent(new window.Event('loadedmetadata'));
+  assert.ok(v.currentTime > 0,
+    `прогрев должен увести позицию с нуля, иначе seek из placeVideo останется
+     вымышленным (получили ${v.currentTime})`);
+  assert.equal(v.dataset.warm, '1', 'прогрев одноразовый');
+  // повторное событие греть не должно
+  v.currentTime = 0;
+  v.dispatchEvent(new window.Event('loadedmetadata'));
+  assert.equal(v.currentTime, 0, 'второй прогрев снова увёл бы позицию');
+});
+
+test('placeVideo добивает seek, если позиция та же, а кадра нет', () => {
+  // readyState 1 и запрошенная позиция равна текущей: без подталкивания
+  // assign currentTime ничего не делает и кадр никогда не декодируется.
+  const clip = freshClip();
+  const v = player.videoFor(clip);
+  let ct = 0;
+  const seen = [];
+  Object.defineProperty(v, 'currentTime', {
+    configurable: true,
+    get: () => ct,
+    set: (x) => { seen.push(x); ct = x; },
+  });
+  Object.defineProperty(v, 'readyState', { configurable: true, get: () => 1 });
+  state.state.time = 0;
+  player.renderFrame(0);
+  assert.ok(seen.includes(0.001),
+    `без увода на миллисекунду seek остается вымышленным (присвоения: ${seen})`);
+  assert.equal(seen[seen.length - 1], 0, 'конечная позиция должна быть запрошенной');
 });
 
 test('как только известны метаданные, кадр перерисовывается', () => {

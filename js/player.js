@@ -114,7 +114,18 @@ function placeVideo(v, local) {
   // Раньше здесь был ранний выход при readyState < 1 — см. комментарий ниже.
   const drift = Math.abs((v.currentTime || 0) - local);
   if (state.playing && drift <= 0.3) return;
-  try { v.currentTime = local; } catch { /* позиция вне доступного диапазона */ }
+  try {
+    // seek на позицию, в которой элемент уже стоит, браузер считает
+    // выполненным: события seeked не будет, декодер не запустится, readyState
+    // застрянет на 1 — и drawCover молча выйдет, оставив сцену чёрной.
+    // Пробник в media.js потому и просит 0.25 с, а не 0. Уводим на миллисекунду
+    // и сразу возвращаемся: конечная позиция та же, но seek настоящий.
+    // Условие readyState === 1 — ровно застревающее состояние: как только
+    // данные для позиции есть, readyState становится 2 и подталкивание
+    // прекращается само.
+    if (v.readyState === 1 && drift < 1e-6) v.currentTime = local + 0.001;
+    v.currentTime = local;
+  } catch { /* позиция вне доступного диапазона */ }
 }
 
 export function videoFor(clip) {
@@ -136,6 +147,8 @@ export function videoFor(clip) {
   // Без этих слушателей сцена оставалась чёрной: кадр никто не перерисовывал,
   // когда видео наконец декодировалось.
   const repaint = () => { if (!state.playing) renderFrame(state.time); };
+  // Прогрев декодера — см. warmUpDecoder.
+  v.addEventListener('loadedmetadata', () => warmUpDecoder(v));
   // loadedmetadata, а не только loadeddata: как только известны размеры и
   // длительность, можно выставить currentTime — а до этого placeVideo молча
   // выходит, и seek не выдаётся вообще.
@@ -149,13 +162,11 @@ export function videoFor(clip) {
     if (state.playing) return;
     showFrameHint(true, v, 'error');
   });
-  // src ДО appendChild и без load(): это ровно рецепт пробника в media.js,
-  // который в браузере пользователя работает (миниатюра клипа на таймлайне —
-  // живой кадр из видео). Явный load() после src запускает алгоритм загрузки
-  // ВТОРОЙ раз и сбрасывает элемент в readyState 0 — на blob-адресе это могло
-  // уводить загрузку в тупик.
-  v.src = media?.url || '';
+  // Без load(): явный load() после src запускает алгоритм загрузки ВТОРОЙ раз и
+  // сбрасывает элемент в readyState 0 — на blob-адресе это могло уводить
+  // загрузку в тупик. Пробник в media.js load() не вызывает.
   (document.getElementById('video-sink') || document.body).appendChild(v);
+  v.src = media?.url || '';
   clip._video = v;
   return v;
 }
@@ -367,6 +378,23 @@ function kickDecoder(v) {
     const p = v.play();
     if (p && typeof p.catch === 'function') p.catch(() => { /* автоплей запрещён */ });
   } catch { /* браузер не дал play — подпись скажет почему */ }
+}
+
+/**
+ * Прогрев декодера для спрятанного и стоящего на паузе <video>.
+ *
+ * seek на позицию 0, в которой свежий элемент уже стоит, браузер считает
+ * выполненным: события seeked не будет, readyState застрянет на 1, drawCover
+ * молча выйдет — сцена чёрная. Пробник в media.js получает кадр тем, что
+ * просит НЕНУЛЕВУЮ позицию. Повторяем этот приём: после прогрева текущая
+ * позиция отличается от нулевой, и обычный seek из placeVideo становится
+ * настоящим.
+ */
+function warmUpDecoder(v) {
+  if (!v || v.readyState >= 2 || v.dataset.warm) return;
+  v.dataset.warm = '1';
+  const target = Math.min(0.25, (isFinite(v.duration) ? v.duration : 1) * 0.1);
+  try { v.currentTime = target; } catch { /* длительность ещё не известна */ }
 }
 
 /**
