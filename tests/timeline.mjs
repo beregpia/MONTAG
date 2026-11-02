@@ -409,8 +409,8 @@ test('исходники: блок рисуется с волформой и о�
   setSrc(true);
 
   assert.ok(document.querySelector('.foley-src-head'), 'заголовок блока есть');
-  assert.match(document.querySelector('.foley-src-head').textContent, /своя шкала/,
-    'шкала исходников честно названа своей, а не таймлайна');
+  assert.match(document.querySelector('.foley-src-head').textContent, /на шкале видео/,
+    'заголовок честно говорит, что дорожки стоят на шкале видео');
 
   const rows = document.querySelectorAll('#foley-track .foley-row.src');
   assert.equal(rows.length, 1, 'строка исходника отрисовалась');
@@ -428,8 +428,13 @@ test('исходники: блок рисуется с волформой и о�
   // том, что ПЕРВЫЙ элемент строки — одна и та же колонка заголовка, а полоса
   // идёт после неё. Поэтому сравниваем состав детей, а не геометрию.
   const kids = (row) => Array.from(row.children).map((c) => c.className);
+  assert.equal(kids(rows[0]).filter((c) => c.includes('tl-gutter')).length, 1,
+    'колонка заголовка в строке РОВНО ОДНА: две уводят полосу на её ширину, '
+    + 'и выравнивание пропадает — этот баг уже был однажды');
   assert.ok(kids(rows[0])[0].includes('tl-gutter'),
     'первый элемент строки исходника — колонка заголовка, а не сама полоса');
+  assert.ok(kids(rows[0]).at(-1).includes('foley-lane'),
+    'последний элемент — полоса: между колонкой и полосой ничего нет');
   const clipRow = document.querySelector('#foley-track .foley-row:not(.src)');
   assert.ok(kids(clipRow)[0].includes('tl-gutter'),
     'у строки размещения та же колонка — значит полосы начинаются вместе');
@@ -439,20 +444,73 @@ test('исходники: блок рисуется с волформой и о�
     'отметка на каждый найденный шаг');
 });
 
-test('исходники: шкала исходников не равна таймлайну', () => {
+test('исходники: дорожка стоит на шкале видео, а не на своей', () => {
   srcScene();
   putSrc();
+  // Строка размещения должна быть в блоке — иначе не с чем сравнивать масштаб,
+  // и проверка держалась бы на состоянии, оставленном чужими тестами.
+  state.setPlacements([
+    { id: 'z1', time: 0.0, duration: 0.33, file: 'steps 02.L.wav', cutFrom: 0, cutTo: 0.33, category: 'steps' },
+  ]);
   setSrc(true);
   const row = document.querySelector('#foley-track .foley-row.src');
   const clipRow = document.querySelector('#foley-track .foley-row:not(.src)');
-  // у исходной дорожки своя ширина (20 с записи), у размещения — своя
+  assert.ok(clipRow, 'строка размещения в блоке есть — с ней и сравниваем');
+  // Полоса — во всю ширину таймлайна, как у клипа: иначе шкалы снова разъедутся
+  // и playhead не дойдёт до конца дорожки. Раньше здесь была ширина записи
+  // (20 с), и полоса заканчивалась на трети таймлайна.
   const srcW = parseFloat(row.querySelector('.foley-lane').style.width);
-  const total = timeline.timelineWidth ? timeline.timelineWidth() : 0;
+  const clipW = parseFloat(clipRow.querySelector('.foley-lane').style.width);
   assert.ok(srcW > 0, 'полоса исходника имеет ширину');
-  assert.ok(srcW < total || total === 0,
-    'запись короче монтажа: 20 с исходника против 60 с таймлайна');
-  assert.ok(!document.querySelector('#foley-track .src-playhead'),
-    'playhead по исходникам не идёт — шкалы не совпадают, и это не баг');
+  assert.equal(srcW, clipW,
+    'полоса исходника занимает тот же масштаб, что видео и размещение');
+  // Отметки переводятся на шкалу монтажа через sourceTimeAt. Проверяем отношением:
+  // pps внутри модуля неизвестен, а отношение координат от него не зависит.
+  const track = state.state.foleyTracks[0];
+  const lefts = Array.from(row.querySelectorAll('.foley-src-tick'))
+    .map((t) => parseFloat(t.style.left));
+  const ats = track.events.map((e) => state.sourceTimeAt(track, e.time));
+  assert.equal(lefts.length, ats.length, 'отметка на каждый найденный шаг');
+  for (let i = 0; i < lefts.length; i++) {
+    assert.equal(lefts[i], ats[i] * (lefts[0] / ats[0]),
+      `отметка ${i} лежит на шкале видео, а не на шкале записи`);
+  }
+});
+
+test('исходники: сдвиг правится кадровыми кнопками', () => {
+  srcScene();
+  putSrc();
+  setSrc(true);
+  const track = state.state.foleyTracks[0];
+  const fps = state.state.settings.fps;
+  const q = () => document.querySelectorAll('#foley-track .foley-row.src .src-nudge');
+  assert.equal(q().length, 3, 'три кнопки: на кадр раньше, на кадр позже, сброс');
+  assert.equal(track.reg.d, 0, 'без правки сдвига нет');
+
+  // после клика дорожка перерисовывается, поэтому кнопки переспрашиваем
+  q()[1].click();
+  assert.ok(Math.abs(track.reg.d - 1 / fps) < 1e-9,
+    'кнопка сдвигает ровно на кадр, а не на круглую секунду');
+  q()[0].click();
+  assert.ok(Math.abs(track.reg.d) < 1e-9, 'кнопки симметричны');
+
+  q()[1].click(); q()[1].click();
+  assert.ok(Math.abs(track.reg.d - 2 / fps) < 1e-9, 'сдвиг накопился');
+  q()[2].click();
+  assert.equal(track.reg.d, 0, 'сброс возвращает дорожку к началу видео');
+});
+
+test('sourceTimeAt: запись переводится на шкалу монтажа', () => {
+  const t = (reg) => ({ name: 'x', duration: 20, events: [], reg });
+  assert.equal(state.sourceTimeAt(t({ k: 1, d: 0 }), 5), 5, 'без правки время то же');
+  assert.equal(state.sourceTimeAt(t({ k: 1, d: 0.5 }), 5), 5.5, 'сдвиг прибавляется');
+  assert.equal(state.sourceTimeAt(t({ k: 1.01, d: 0 }), 100), 101, 'растяжение умножает');
+  assert.equal(state.sourceTimeAt(t({ k: 0.99, d: 0.2 }), 10), 10.1,
+    'сдвиг и растяжение вместе');
+  // дорожка без регистрации — как записано: setSourceTrack подставляет дефолт,
+  // но дорожка могла прийти из сохранённого проекта без него
+  assert.equal(state.sourceTimeAt({ duration: 20, events: [] }, 3), 3,
+    'без reg время не меняется');
 });
 
 test('исходники: отметка шага прослушивает тейк', () => {

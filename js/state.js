@@ -190,8 +190,33 @@ export function clearPlacements() {
  */
 export function setSourceTrack(t) {
   const i = state.foleyTracks.findIndex((x) => x.name === t.name);
-  if (i === -1) state.foleyTracks.push({ ...t });
-  else state.foleyTracks[i] = { ...t };
+  const next = { ...t, reg: { k: 1, d: 0, ...(t.reg || {}) } };
+  if (i === -1) state.foleyTracks.push(next);
+  else state.foleyTracks[i] = next;
+  bus.emit(EV.TRACKS);
+}
+
+/**
+ * Время ЗАПИСИ → время МОНТАЖА для исходной дорожки.
+ *
+ * Дорожка пишется до того, как персонаж вошёл в кадр, и не всегда с той же
+ * скоростью, что картинка. Пока исходники жили на своей шкале, это не имело
+ * значения; теперь они стоят на шкале видео, и без этого преобразования отметки
+ * легли бы не туда. `k` — растяжение (1 — как записано), `d` — сдвиг в секундах.
+ *
+ * Чистая функция здесь, а не в таймлайне: её должны видеть и отрисовка, и тесты.
+ */
+export function sourceTimeAt(track, t) {
+  const k = track?.reg?.k ?? 1;
+  const d = track?.reg?.d ?? 0;
+  return t * k + d;
+}
+
+/** Поправить регистрацию дорожки. `patch` — {k?, d?}. */
+export function setSourceTrackReg(name, patch) {
+  const t = state.foleyTracks.find((x) => x.name === name);
+  if (!t) return;
+  t.reg = { k: t.reg?.k ?? 1, d: t.reg?.d ?? 0, ...patch };
   bus.emit(EV.TRACKS);
 }
 

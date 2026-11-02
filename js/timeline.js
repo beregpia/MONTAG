@@ -1,6 +1,6 @@
 /* ============ Таймлайн: клипы, перетаскивание, плейхед, зум ============ */
 
-import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, setTrackVolume, trackAudible } from './state.js';
+import { state, EV, bus, clamp, computeLayout, totalDuration, selectClip, selectFoley, getMedia, removeClip, setTrackMute, setTrackSolo, setTrackVolume, trackAudible, setSourceTrackReg, sourceTimeAt } from './state.js';
 import { fmtTime, el } from './ui.js';
 import * as player from './player.js';
 import { makeClipFromMedia } from './media.js';
@@ -554,41 +554,78 @@ function trackHead(file, label, count) {
 /**
  * Исходная дорожка: волформа всей записи и отметки найденных шагов.
  *
- * Шкала здесь СВОЯ, не таймлайна: время в записи не совпадает со временем
- * монтажа — именно поэтому расстановка и существует. Playhead по этой полосе
- * не идёт, и это не баг. Сама полоса при этом выровнена с видео: колонка
- * заголовка у неё такая же, как у всех остальных строк.
+ * Полоса стоит на шкале ВИДЕО, а не на своей собственной.
+ *
+ * Раньше было наоборот: время записи не совпадает со временем монтажа, поэтому
+ * отметки стояли там, где легли в записи, и playhead по полосе не шёл.
+ * Пользователь попросил иначе — «исходные дорожки должны стоять ровно с видео»,
+ * дорожки у него по минуте, как и клип. Поэтому отметка идёт через
+ * sourceTimeAt — запись переводится на шкалу монтажа, и playhead по полосе идёт.
+ *
+ * Сдвиг правится кадровыми кнопками в заголовке: звук пишется до того, как
+ * персонаж вошёл в кадр, и по кадрам это вернее, чем по секундам.
  */
 function sourceRow(t, width) {
-  const w = Math.max(0, (t.duration || 0) * pps);
+  const reg = t.reg || { k: 1, d: 0 };
+  const fps = Number(state.settings.fps) || 25;
+  const frame = 1 / fps;
+  // Полоса — во всю ширину таймлайна, как у клипа.
   const row = el('div', { class: 'foley-row src' });
-  // Колонка заголовка — такая же, как у всех остальных строк: .tl-gutter,
-  // 152 px. Раньше здесь был якорь нулевой ширины с подписью поверх полосы, и
-  // полоса исходной дорожки начиналась на 152 px ЛЕВЕЕ видео, линейки и
-  // размещения — «исходные дорожки должны стоять ровно с видео». Якорь имел
-  // смысл, когда у строк фоли колонки не было вовсе; теперь она есть у всех,
-  // и исходники остались единственным исключением.
+  // Сдвиг правится кадровыми кнопками в заголовке.
+  const nudge = (frames) => {
+    // 0 — это не «на ноль кадров», а сброс: дорожка возвращается к началу видео.
+    // Первая версия звала nudge(0) как обычный сдвиг, и кнопка не делала ничего.
+    const d = frames === 0 ? 0 : (reg.d || 0) + frames * frame;
+    setSourceTrackReg(t.name, { d });
+  };
+  const mkNudge = (frames, glyph, title) => {
+    const b = el('button', {
+      class: 'src-nudge', title, 'data-src': t.name, 'data-frames': String(frames),
+    }, glyph);
+    b.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      nudge(frames);
+    });
+    // полоса слушает клики, чтобы уводить playhead — кнопки не должны
+    b.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    return b;
+  };
+  const shiftTxt = reg.d === 0 ? 'без сдвига'
+    : `${reg.d > 0 ? '+' : '−'}${Math.abs(reg.d).toFixed(3)} с`;
+  // Колонка заголовка — такая же, как у всех остальных строк: .tl-gutter, 152 px.
+  // Раньше здесь был якорь нулевой ширины с подписью поверх полосы, и полоса
+  // начиналась на 152 px ЛЕВЕЕ видео, линейки и размещения — «исходные дорожки
+  // должны стоять ровно с видео». Колонка в строке должна быть РОВНО ОДНА:
+  // две уводят полосу на её ширину, и выравнивание пропадает снова.
   row.append(el('div', { class: 'tl-gutter tl-gutter-foley' },
     el('span', {
       class: 'tl-gutter-name',
-      title: `${t.name} · ${t.events.length} шагов`,
-    }, shortTrackName(t.name))));
-  const lane = el('div', { class: 'foley-lane', style: `width:${Math.max(w, 1)}px` });
-  if (w > 0 && w <= width + 4) {
+      title: `${t.name} · ${t.events.length} шагов · сдвиг ${shiftTxt}`,
+    }, shortTrackName(t.name)),
+    mkNudge(-1, '◀', `На кадр раньше (−1/${fps} с)`),
+    mkNudge(1, '▶', `На кадр позже (+1/${fps} с)`),
+    mkNudge(0, '⟲', 'Вернуть дорожку к началу видео')));
+  const lane = el('div', { class: 'foley-lane', style: `width:${Math.max(width, 1)}px` });
+  // Волформа занимает ровно тот участок шкалы видео, который накрывает запись.
+  const end = sourceTimeAt(t, t.duration || 0);
+  const w = Math.max(0, end * pps);
+  const left = Math.max(0, (reg.d || 0) * pps);
+  if (w > 0) {
     const points = Math.max(24, Math.min(240, Math.round(w * 2)));
     const wave = bank.waveform(t.name, points, 0, t.duration);
-    if (wave) lane.append(sourceWaveform(wave, w));
+    if (wave) lane.append(sourceWaveform(wave, w, left));
   }
   for (const e of t.events) {
-    if (e.time * pps > width) continue;
-    lane.append(sourceTick(e, t));
+    const at = sourceTimeAt(t, e.time);
+    if (at < 0 || at * pps > width) continue;
+    lane.append(sourceTick(e, t, at));
   }
   row.append(lane);
   return row;
 }
 
 /** Волформа исходной дорожки: та же зеркальная заливка, что у клипа. */
-function sourceWaveform(wave, w) {
+function sourceWaveform(wave, w, left) {
   const h = 100;
   const mid = h / 2;
   const step = w / Math.max(1, wave.length - 1);
@@ -601,7 +638,7 @@ function sourceWaveform(wave, w) {
     const x = (i * step).toFixed(2);
     d += `L${x} ${(mid + wave[i] * (mid - 3)).toFixed(2)}`;
   }
-  const wrap = el('div', { class: 'foley-src-wave' });
+  const wrap = el('div', { class: 'foley-src-wave', style: `left:${left}px;width:${w}px` });
   wrap.innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">`
     + `<line class="axis" x1="0" y1="${mid}" x2="${w}" y2="${mid}"/>`
     + `<path d="${d}Z"/></svg>`;
@@ -609,12 +646,13 @@ function sourceWaveform(wave, w) {
 }
 
 /** Отметка шага в исходной дорожке. Клик прослушивает тейк. */
-function sourceTick(e, t) {
+function sourceTick(e, t, at) {
   const tick = el('div', {
     class: 'foley-src-tick',
-    style: `left:${e.time * pps}px`,
+    style: `left:${at * pps}px`,
     title: `${fmtTime(e.time)} · сила ${Math.round((e.strength ?? 0) * 100)}%`
-      + ` · длина ${(e.duration || 0).toFixed(2)} с\nклик — прослушать`,
+      + ` · длина ${(e.duration || 0).toFixed(2)} с\nклик — прослушать`
+      + `\nв записи: ${fmtTime(e.time)}`,
   });
   tick.addEventListener('click', (ev) => {
     ev.stopPropagation();
@@ -690,9 +728,9 @@ function sourceHead() {
   // Распорка той же ширины, что колонка дорожек: иначе описание блока
   // начинается на 152 px левее полос, к которым относится.
   return el('div', { class: 'foley-src-head' },
-    el('div', { style: 'flex:0 0 152px;width:152px' }),
+    el('div', { style: `flex:0 0 ${GUTTER}px;width:${GUTTER}px` }),
     el('span', {}, 'исходные дорожки'),
-    el('span', { class: 'muted small' }, 'своя шкала времени, не таймлайн — '
+    el('span', { class: 'muted small' }, 'на шкале видео — ◀ ▶ сдвигают на кадр, '
       + 'клик по отметке прослушивает тейк'));
 }
 
