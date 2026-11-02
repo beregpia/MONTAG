@@ -777,7 +777,8 @@ function render() {
     '👣 Только шаги');
   stepBtn.title = 'Включено: детектор оставляет только события, похожие на шаг, '
     + 'и ставит им категорию steps. Нажмите, чтобы оставить всё движение — '
-    + 'для ткани, дверей и прочего тихого.';
+    + 'для ткани, дверей и прочего тихого. Шаги за предметами (ступни скрыты) '
+    + 'фильтр не теряет: он смотрит на ритм, а не только на низ кадра.';
   const paintStepBtn = () => {
     stepBtn.textContent = onlySteps ? '👣 Только шаги' : '👣 Любое движение';
     stepBtn.className = onlySteps ? 'btn primary' : 'btn';
@@ -803,7 +804,8 @@ function render() {
     }
   });
   body.append(el('div', { class: 'row' }, stepBtn, thr,
-    el('span', { class: 'muted small' }, 'отбор шагов и порог строгости')));
+    el('span', { class: 'muted small' },
+      'отбор шагов и порог строгости · шаги за предметами не теряются')));
   body.append(el('div', { class: 'muted small', id: 'engine-steps' }, lastStepStats));
   body.append(el('div', { class: 'muted small', id: 'engine-readout' },
     `playhead: ${fmtTime(state.time || 0)} · кадр ${Math.round((state.time || 0) * (state.settings.fps || 25))} · fps ${state.settings.fps}`));
